@@ -14,6 +14,8 @@ Per cell, marching along the coolant flow direction:
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
@@ -22,6 +24,8 @@ from . import correlations as co
 from .coolant import Coolant
 from .hotgas import HotGas
 from .layout import ChannelLayout
+
+log = logging.getLogger(__name__)
 
 
 class RegenSolver:
@@ -80,8 +84,8 @@ class RegenSolver:
                 if Nu_j > 0:
                     Nu = Nu_j
                     regime = "supercritical"
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Jackson supercritical HTC skipped: %s", exc)
             h_conv = Nu * st.k / Dh
             if self.cfg.curvature_enhancement:
                 h_conv *= co.curvature_htc_factor(Re, d_over_D)
@@ -100,8 +104,8 @@ class RegenSolver:
                 dT_w = max(T_wc - st.T, 1e-3)
                 h_conv = h_conv + S * h_fz * (T_wc - st.T_sat) / dT_w
                 regime = "nucleate_boiling"
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Forster-Zuber boiling correction skipped: %s", exc)
         return h_conv, Re, f, regime
 
     # ----------------------------------------------------------- marching

@@ -231,7 +231,7 @@ Controls Rao/Bell (or conical) contour generation.
 |-------|------|---------|-------------|-------------|
 | `contraction_ratio` | float | — | > 1 | Chamber-to-throat area ratio |
 | `l_star_m` | float | — | > 0 | Characteristic length L* [m] |
-| `contour` | string | `"rao_bell"` | `rao_bell`, `conical`, `moc` | Contour method |
+| `contour` | string | `"rao_bell"` | `rao_bell`, `conical` | Contour method (`moc` reserved for a future release) |
 | `bell_fraction` | float | 0.8 | 0.5–1.0 | Bell length vs 15° cone reference |
 | `conv_half_angle_deg` | float | 30 | 0–60 | Convergent half-angle [deg] |
 | `rt_upstream_factor` | float | 1.5 | > 0 | Upstream throat arc R / R_t |
@@ -609,9 +609,9 @@ python -m resa report configs/e2_c1/design.yaml
 ### Engine + regen campaign
 
 ```bash
-python E2_Main_Analysis_Regen.py
-# or
-python -m resa report configs/e2_c1/design_regen.yaml
+python -m resa campaign campaigns/e2_c1/e2_regen.yaml
+# or single config:
+python -m resa report configs/projects/e2_c1/design_regen.yaml
 ```
 
 ### Standalone regen (no engine)
@@ -711,3 +711,5 @@ Reports label each quantity with how it was determined:
 | `sync.mdot=false requires solver.mdot_total` | Fixed mdot not specified |
 | `channel layout exceeds 1 m circumference` | Cooling block units wrong |
 | `table: give of plus ALL properties as lists` | Incomplete combustion table |
+| `chamber.contour=moc is not yet implemented` | Use `rao_bell` or `conical` |
+| `circular base: inheritance detected` | Fix cyclic `base:` chain in YAML |

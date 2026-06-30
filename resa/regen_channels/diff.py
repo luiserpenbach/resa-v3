@@ -7,7 +7,7 @@
   3. Solver:   (--solve) both solved, key thermal/hydraulic scalars compared.
 
 Usage:
-    python -m regen_channels.diff A.yaml B.yaml [--solve] [--html out.html]
+    python -m resa.regen_channels.diff A.yaml B.yaml [--solve] [--html out.html]
 
 Plotly overlay report: solid = A, dashed = B.
 """
@@ -246,7 +246,7 @@ def run_diff(path_a: str, path_b: str, solve: bool = False,
     if html:
         os.makedirs(os.path.dirname(html) or ".", exist_ok=True)
         figure_diff(la, lb, ra, rb, name_a, name_b).write_html(
-            html, include_plotlyjs=True)
+            html, include_plotlyjs="cdn")
         print(f"\nwrote {html}")
     return la, lb, ra, rb
 

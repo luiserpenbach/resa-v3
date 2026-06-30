@@ -52,6 +52,7 @@ class ThrustChamberResult:
     exit_mach: float
     separated: bool                  # Summerfield pe < 0.4 p_amb
     eta_cf: float = 1.0              # nozzle (CF) efficiency applied
+    pc_converged: bool = True        # analyze-mode Pc fixed-point convergence
     provenance: dict = field(default_factory=dict)
 
 

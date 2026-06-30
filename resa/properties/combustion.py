@@ -60,6 +60,12 @@ class TableModel:
         )
 
 
+@lru_cache(maxsize=16)
+def _cea_obj(ox: str, fuel: str):
+    from rocketcea.cea_obj_w_units import CEA_Obj  # noqa: deferred import
+    return CEA_Obj(oxName=ox, fuelName=fuel)
+
+
 @dataclass(frozen=True)
 class CeaModel:
     ox: str
@@ -72,9 +78,8 @@ class CeaModel:
         return 0.5, 12.0
 
     def at(self, of: float, pc_bar: float | None = None) -> CombustionResult:
-        from rocketcea.cea_obj_w_units import CEA_Obj  # noqa: deferred import
         pc_psia = (pc_bar or 25.0) * 14.5038
-        cea = CEA_Obj(oxName=self.ox, fuelName=self.fuel)
+        cea = _cea_obj(self.ox, self.fuel)
         cstar = cea.get_Cstar(Pc=pc_psia, MR=of) * 0.3048
         tc = cea.get_Tcomb(Pc=pc_psia, MR=of) * 5.0 / 9.0
         mw, g = cea.get_Chamber_MolWt_gamma(Pc=pc_psia, MR=of, eps=self.eps_hint)

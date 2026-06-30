@@ -62,6 +62,7 @@ def evaluate_point(
     of = mdot_ox / mdot_fuel
     mdot = mdot_ox + mdot_fuel
     pc_bar = pc_guess_bar
+    pc_converged = True
     for _ in range(20):
         comb = model.at(of, pc_bar=pc_bar)
         cstar_eff = comb.cstar_ideal_m_s * eta_cstar
@@ -70,6 +71,8 @@ def evaluate_point(
         pc_bar = pc_new
         if converged:
             break
+    else:
+        pc_converged = False
     # re-evaluate properties at the converged pc so gamma/Tc match pc_bar
     comb = model.at(of, pc_bar=pc_bar)
     cstar_eff = comb.cstar_ideal_m_s * eta_cstar
@@ -87,7 +90,7 @@ def evaluate_point(
         of=of, mdot=mdot, mdot_ox=mdot_ox, mdot_fuel=mdot_fuel,
         pc_bar=pc_bar, pe_bar=pe / _BAR, thrust_N=thrust, isp_s=isp,
         cf=cf, cstar_eff_m_s=cstar_eff, exit_mach=Me, gamma=g,
-        separated=separated, comb=comb,
+        separated=separated, comb=comb, pc_converged=pc_converged,
     )
 
 
@@ -197,6 +200,7 @@ def analyze(geom: GeometryConfig, ap: AnalyzePoint, model) -> ThrustChamberResul
         eps=eps, pe_bar=pt["pe_bar"], cf=pt["cf"],
         isp_s=pt["isp_s"], exit_mach=pt["exit_mach"],
         separated=pt["separated"],
+        pc_converged=pt["pc_converged"],
         provenance={
             "thrust": "calculated", "pc": "calculated",
             "of_ratio": "calculated (from mdots)", "eps": eps_prov,

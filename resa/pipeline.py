@@ -16,9 +16,14 @@ from .properties import combustion
 from .results import EngineResult, UncertaintyResult
 
 
-def _checks(cfg: EngineConfig, tc, cont) -> tuple:
+def _checks(cfg: EngineConfig, tc, cont, *, pc_converged: bool = True) -> tuple:
     """Cheap physical sanity checks -> human-readable warnings."""
     w = []
+    if not pc_converged:
+        w.append(
+            "chamber pressure fixed-point did not converge in 20 iterations "
+            f"(final pc={tc.pc_bar:.3f} bar) — check mass flows and eta_c*"
+        )
     if tc.separated:
         w.append(
             f"FLOW SEPARATION RISK at nominal: pe={tc.pe_bar:.2f} bar < "
@@ -101,7 +106,7 @@ def run(cfg: EngineConfig) -> EngineResult:
         engine=cfg.engine, config_hash=cfg.config_hash, mode=cfg.mode,
         combustion=comb, thrust_chamber=tc, contour=cont, offdesign=od,
         uncertainty=unc,
-        warnings=_checks(cfg, tc, cont) + (od.notes if od else ()),
+        warnings=_checks(cfg, tc, cont, pc_converged=tc.pc_converged) + (od.notes if od else ()),
     )
 
 

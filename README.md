@@ -22,10 +22,6 @@ python -m resa campaign campaigns/e2_c1/e2.yaml
 python -m resa campaign campaigns/e2_c1/e2_regen.yaml
 python -m resa campaign campaigns/E2-1A/e2_1a.yaml
 python -m resa campaign campaigns/EX15-1A/ex15_regen.yaml
-
-# Legacy entry points
-python E2_Main_Analysis.py          # E2-1A campaign
-python E2_Main_Analysis_Regen.py    # E2-C1 regen campaign
 ```
 
 ### RESA Studio (web UI)
@@ -109,6 +105,19 @@ python -m resa diff   out/A_xxx out/B_yyy             # compare two runs
 pytest tests/                                         # CI golden suite (table backend)
 ```
 
+## Python API
+
+```python
+from resa.config.loader import load_config
+from resa.pipeline import run
+from resa.reporting.report import write_report
+
+cfg = load_config("configs/projects/e2_c1/design.yaml")
+result = run(cfg)
+outdir, result = write_report(result, cfg, "configs/projects/e2_c1/design.yaml")
+print(result.summary())
+```
+
 ## Report folder
 
 ```
@@ -164,6 +173,7 @@ tests/                pytest golden + unit suite
 
 Reports include warnings for:
 
+- Chamber pressure non-convergence in analyze mode (fixed-point iteration)
 - Flow separation risk (Summerfield criterion)
 - Cooling channel fit at throat circumference
 - Chamber L* feasibility
@@ -179,4 +189,4 @@ Reports include warnings for:
 - [x] η_c* uncertainty bands
 - [x] High-fidelity regen channel solver + RESA integration
 - [x] RESA Studio web UI (fast/full runs, previews, compare, campaigns)
-- [x] MoC contour option (`chamber.contour: moc`)
+- [ ] MoC contour (`chamber.contour: moc`) — planned; use `rao_bell` or `conical` today

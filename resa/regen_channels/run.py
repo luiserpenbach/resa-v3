@@ -5,20 +5,11 @@ import os
 import sys
 
 import numpy as np
-import pandas as pd
 
 from .config import RegenConfig
 from .contour import build_contour
+from .export import export_artifacts
 from .layout import ChannelLayout
-from .mesh import (
-    build_channel_mesh,
-    channel_centerline,
-    centerlines_export_basename,
-    html_3d_export_basename,
-    mesh_export_basename,
-    write_binary_stl,
-    write_step,
-)
 
 
 def run(config_path: str):
@@ -56,60 +47,9 @@ def run(config_path: str):
             print(f"[{tag}] WARNING: hot wall exceeds "
                   f"{cfg.solver.wall.max_wall_temp_K:.0f} K limit.")
 
-    files = []
-    e = cfg.export
-    if e.geometry_csv:
-        f = os.path.join(out, f"{tag}_geometry.csv")
-        lay.to_dataframe().to_csv(f, index=False)
-        files.append(f)
-    if e.results_csv and results is not None:
-        f = os.path.join(out, f"{tag}_results.csv")
-        results.to_csv(f, index=False)
-        files.append(f)
-    if e.centerlines_csv:
-        cl_ids = e.channel_ids(lay, "centerlines_channels")
-        rows = []
-        for k in cl_ids:
-            cl = channel_centerline(lay, k)
-            rows.append(pd.DataFrame(
-                {"channel": k, "x_mm": cl[:, 0] * 1e3,
-                 "y_mm": cl[:, 1] * 1e3, "z_mm": cl[:, 2] * 1e3}))
-        f = os.path.join(out, centerlines_export_basename(tag, cl_ids))
-        pd.concat(rows).to_csv(f, index=False)
-        files.append(f)
-    if e.stl:
-        ids = e.channel_ids(lay, "stl_channels")
-        verts, faces, _ = build_channel_mesh(lay, ids)
-        f = os.path.join(out, mesh_export_basename(tag, ids, "stl"))
-        write_binary_stl(f, verts, faces)
-        files.append(f)
-    if e.step:
-        ids = e.channel_ids(lay, "step_channels")
-        f = os.path.join(out, mesh_export_basename(tag, ids, "step"))
-        write_step(f, lay, ids, faceted=e.step_faceted)
-        files.append(f)
-    if e.html_3d:
-        from .viz import figure_3d
-        ids = e.channel_ids(lay, "html_3d_channels")
-        fig = figure_3d(lay, results, color_by=e.color_3d_by, channel_ids=ids)
-        f = os.path.join(out, html_3d_export_basename(tag, ids))
-        fig.write_html(f, include_plotlyjs=True)
-        files.append(f)
-    if e.html_plots:
-        from .viz import figure_coolant_path, figure_geometry, figure_results
-        f = os.path.join(out, f"{tag}_geometry_plots.html")
-        figure_geometry(lay).write_html(f, include_plotlyjs=True)
-        files.append(f)
-        if results is not None:
-            f = os.path.join(out, f"{tag}_results_plots.html")
-            figure_results(results, lay,
-                           cfg.solver.wall.max_wall_temp_K).write_html(
-                f, include_plotlyjs=True)
-            files.append(f)
-            f = os.path.join(out, f"{tag}_coolant_path.html")
-            figure_coolant_path(results, cfg.solver.coolant).write_html(
-                f, include_plotlyjs=True)
-            files.append(f)
+    files, warnings = export_artifacts(lay, cfg, results, out_dir=out, tag=tag)
+    for msg in warnings:
+        print(f"[{tag}] WARNING: {msg}")
     print(f"[{tag}] wrote:")
     for f in files:
         print("   ", f)

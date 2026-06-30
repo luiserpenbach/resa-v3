@@ -18,6 +18,8 @@ from dataclasses import dataclass
 import numpy as np
 from CoolProp.CoolProp import PropsSI
 
+from ..properties import fluids as fp
+
 _TC = {"N2O": 309.52, "CO2": 304.1282}
 _RHOC = {"N2O": 452.011, "CO2": 467.6}
 
@@ -52,8 +54,8 @@ class Coolant:
     def transport(self, T: float, rho: float):
         """(mu [Pa s], k [W/m/K]) from T, rho."""
         if not self._is_n2o:
-            mu = PropsSI("V", "T", T, "D", rho, self.cp_name)
-            k = PropsSI("L", "T", T, "D", rho, self.cp_name)
+            mu = fp.prop_dr("V", T, rho, self.cp_name)
+            k = fp.prop_dr("L", T, rho, self.cp_name)
             return mu, k
         T_m = T * _TC["CO2"] / _TC["N2O"]
         rho_m = min(rho * _RHOC["CO2"] / _RHOC["N2O"], 1170.0)
@@ -85,7 +87,7 @@ class Coolant:
             k = (1 - q) * kl + q * kv
             cp = (1 - q) * cpl + q * cpv
         else:
-            cp = PropsSI("C", "P", p, "H", h, self.cp_name)
+            cp = fp.prop("C", T, p, self.cp_name)
             mu, k = self.transport(T, rho)
         return CoolantState(T=T, p=p, h=h, rho=rho, cp=cp, mu=mu, k=k,
                             Pr=cp * mu / k, quality=q, T_sat=T_sat,
@@ -107,8 +109,8 @@ class Coolant:
                 mu, k = self.transport(T_sat, rho)
                 cp = PropsSI("C", "P", p, "Q", 1, self.cp_name)
                 return rho, hh, mu, k, cp
-        rho = PropsSI("D", "P", p, "T", T_w, self.cp_name)
-        hh = PropsSI("H", "P", p, "T", T_w, self.cp_name)
+        rho = fp.density(T_w, p, self.cp_name)
+        hh = fp.prop("H", T_w, p, self.cp_name)
         mu, k = self.transport(T_w, rho)
-        cp = PropsSI("C", "P", p, "T", T_w, self.cp_name)
+        cp = fp.prop("C", T_w, p, self.cp_name)
         return rho, hh, mu, k, cp

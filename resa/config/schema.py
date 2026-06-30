@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Literal, Optional, Union
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..regen_channels.config import RegenConfig
 
@@ -195,6 +195,15 @@ class ChamberConfig(StrictModel):
     n_stations: int = Field(default=200, ge=20)
     theta_n_deg: Optional[float] = Field(default=None, gt=0, lt=60)
     theta_e_deg: Optional[float] = Field(default=None, ge=0, lt=30)
+
+    @field_validator("contour")
+    @classmethod
+    def _contour_implemented(cls, v: str) -> str:
+        if v == "moc":
+            raise ValueError(
+                "chamber.contour=moc is not yet implemented — use rao_bell or conical"
+            )
+        return v
 
 
 # --------------------------------------------------------------------------- #

@@ -77,11 +77,18 @@ def _write_rollup(summaries: list[dict], path: Path) -> None:
         w.writerows(summaries)
 
 
-def _regen_diff_html(cfg_a_path: str, cfg_b_path: str, res_a, res_b, path: Path) -> None:
+def _regen_diff_html(cfg_a_path: str, cfg_b_path: str, res_a, res_b, path: Path) -> str | None:
     cfg_a = load_config(cfg_a_path)
     cfg_b = load_config(cfg_b_path)
     if cfg_a.regen is None or cfg_b.regen is None:
-        return
+        missing = []
+        if cfg_a.regen is None:
+            missing.append(cfg_a_path)
+        if cfg_b.regen is None:
+            missing.append(cfg_b_path)
+        return (
+            f"regen diff skipped — no regen block in: {', '.join(missing)}"
+        )
     regen_a = prepare_regen_config(
         cfg_a.regen, res_a.thrust_chamber, res_a.combustion, cfg_a.chamber)
     regen_b = prepare_regen_config(
@@ -91,7 +98,8 @@ def _regen_diff_html(cfg_a_path: str, cfg_b_path: str, res_a, res_b, path: Path)
     path.parent.mkdir(parents=True, exist_ok=True)
     figure_diff(
         lay_a, lay_b, None, None, regen_a.meta.name, regen_b.meta.name,
-    ).write_html(str(path), include_plotlyjs=True)
+    ).write_html(str(path), include_plotlyjs="cdn")
+    return None
 
 
 def run_campaign(
@@ -151,8 +159,11 @@ def run_campaign(
                 f"regen_diff {diff.output!r} references configs not in campaign "
                 f"configs list")
         out_path = out_root / diff.output
-        _regen_diff_html(diff.a, diff.b, results[diff.a], results[diff.b], out_path)
-        if verbose:
+        note = _regen_diff_html(diff.a, diff.b, results[diff.a], results[diff.b], out_path)
+        if note:
+            if verbose:
+                print(f"regen  (skipped) {note}")
+        elif verbose:
             print(f"regen  -> {out_path}")
 
     return out_root

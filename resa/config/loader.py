@@ -29,14 +29,21 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
-def _load_raw(path: Path) -> dict[str, Any]:
+def _load_raw(path: Path, _visited: frozenset[Path] | None = None) -> dict[str, Any]:
     """Load YAML, resolving `base:` inheritance (recursively) and file refs."""
+    path = path.resolve()
+    visited = _visited or frozenset()
+    if path in visited:
+        chain = " -> ".join(str(p) for p in (*visited, path))
+        raise ValueError(f"circular base: inheritance detected: {chain}")
+    visited = frozenset((*visited, path))
+
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     base_ref = raw.pop("base", None)
     raw = _resolve_refs(raw, path.parent)
     if base_ref is not None:
-        base = _load_raw((path.parent / base_ref).resolve())
+        base = _load_raw((path.parent / base_ref).resolve(), visited)
         raw = _deep_merge(base, raw)
     return raw
 

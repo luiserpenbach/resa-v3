@@ -13,6 +13,18 @@ python -m resa_studio
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The server serves the
 static frontend from `frontend/public/` and the REST API under `/api/`.
 
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `RESA_PROJECT_ROOT` | auto-detected repo root | Override project root when configs live elsewhere |
+| `RESA_OUT_ROOT` | `<root>/out` | Saved report folders |
+| `RESA_CONFIGS_ROOT` | `<root>/configs` | Config tree root |
+| `RESA_PROJECTS_ROOT` | `<root>/configs/projects` | Project folders for the sidebar |
+
+Preview requests share an in-process LRU cache (48 entries, 120 s TTL) so
+debounced contour/cooling edits do not re-run the full pipeline on every keystroke.
+
 Optional extras:
 
 | Extra | Purpose |

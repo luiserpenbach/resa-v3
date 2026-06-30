@@ -1536,7 +1536,7 @@
 
     _stringLiterals(key) {
       const map = {
-        contour: ["rao_bell", "conical", "moc"],
+        contour: ["rao_bell", "conical"],
         correlation: ["gnielinski", "chen", "jackson"],
         backend: ["rocketcea", "table"],
       };
