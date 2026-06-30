@@ -1,0 +1,29 @@
+# ===== E2-1A baseline engine (DESIGN mode) =====
+engine: "E2-1A"
+propellants: prop_n2o_ethanol.yaml
+chamber: chamber_E2_TC_01.yaml
+cooling: cooling_none.yaml
+
+combustion:
+  backend: "rocketcea"
+
+operating_point:
+  thrust_N: 2200
+  pc_bar: 25.0
+  of_ratio: 4.0
+  eta_cstar: 0.92
+  eta_cstar_tol: 0.05
+  # eta_cf: 0.98              # omit -> 1.0 (nozzle CF efficiency)
+  p_amb_bar: 1.01325
+
+offdesign:
+  ox_throttle:
+    ox_fraction: [0.4, 1.1]
+    n: 27
+  of_sweep:
+    of_range: [1.5, 6.0]
+    n: 36
+  envelope:
+    throttle_fraction: [0.4, 1.1]
+    of_range: [1.5, 6.0]
+    n: [22, 22]

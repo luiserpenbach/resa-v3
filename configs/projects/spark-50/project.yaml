@@ -1,0 +1,4 @@
+name: Spark-50
+description: 50N hydrogen gox thruster for vacuum applications
+primary_config: spark-50.yaml
+created: '2026-06-29T11:17:25+00:00'

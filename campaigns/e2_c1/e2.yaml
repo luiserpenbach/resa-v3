@@ -1,0 +1,12 @@
+# E2-C1 campaign — design + as-built + HF02
+name: e2_c1
+output: e2_c1_output
+rollup: true
+configs:
+  - ../../configs/projects/e2_c1/design.yaml
+  - ../../configs/projects/e2_c1/asbuilt.yaml
+  - ../../configs/projects/e2_c1/hf02.yaml
+diffs:
+  - a: ../../configs/projects/e2_c1/asbuilt.yaml
+    b: ../../configs/projects/e2_c1/hf02.yaml
+    output: diff_asbuilt_vs_hf02.txt

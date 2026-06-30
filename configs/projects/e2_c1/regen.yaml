@@ -1,0 +1,87 @@
+# High-fidelity regen channel layout + solver for E2-C1.
+# RESA auto-sync (all on by default). Set sync.<key>: false to opt out.
+meta:
+  name: e2_regen
+  description: >
+    E2-class regen channels — axial/spiral/axial helix, variable height,
+    fixed rib, N2O coolant at 60 bar inlet (counterflow).
+  version: "0.1"
+
+contour:
+  type: from_engine
+
+sync:
+  contour: true
+  hot_gas_pc_bar: true
+  hot_gas_tc_K: true
+  hot_gas_gamma: true
+  hot_gas_mol_mass_kg_kmol: true
+  hot_gas_c_star_m_s: true
+  hot_gas_bartz_correction: true
+  of_ratio: true
+  mdot: true
+
+channels:
+  count: 50
+  # RESA engine contour: x=0 at throat, chamber at x<0, nozzle at x>0.
+  # Omit start_x/stop_x for full injector→exit coverage.
+  inner_wall_thickness: 0.5e-3
+  height:
+    - [-0.133, 0.75e-3]       # chamber cylinder
+    - [-0.050, 0.5e-3]
+    - [0.000, 0.5e-3]        # throat
+    - [0.020, 0.5e-3]        # divergent
+    - [0.036, 0.5e-3]        # near exit
+  rib:
+    mode: fixed_width
+    width: 0.5e-3
+  helix:
+    profile:
+      - [-0.130, 0.0]        # axial in chamber
+      - [-0.025, 0.0]
+      - [-0.010, 0.0]       # spiral through throat region
+      - [0.010, 0.0]
+      - [0.030, 0.0]         # axial in nozzle
+    interp: pchip
+    handedness: right
+  min_channel_width: 1.0e-3
+
+geometry:
+  n_stations: 300
+  width_reference: mid_height
+
+solver:
+  enabled: true
+  coolant: NitrousOxide
+  coolant_side: oxidizer       # sync.mdot uses thrust_chamber.mdot_ox_kg_s
+  mdot_from_engine: true      # legacy alias; sync.mdot takes precedence
+  inlet:
+    pressure_bar: 90.0
+    temperature_K: 270.0
+    location: nozzle_end
+  roughness: 12.0e-6
+  curvature_enhancement: true
+  #hot_gas:
+  #  pc_bar: 25.0
+  #  tc_K: 2950.0
+  #  gamma: 1.22
+  #  mol_mass_kg_kmol: 26.0
+  #  mu_pa_s: 9.0e-5
+ #   c_star_m_s: 1580.0
+ #   bartz_correction: 0.75
+  wall:
+    material: "Inconel 718"
+    conductivity: inconel718
+    max_wall_temp_K: 1200.0
+
+export:
+  stl: true
+  stl_channels: all
+  step: true
+  step_channels: 0
+  centerlines_csv: true
+  geometry_csv: true
+  results_csv: true
+  html_3d: true
+  html_plots: true
+  color_3d_by: T_wall_hot

@@ -1,0 +1,3 @@
+# CI / offline golden baseline — same as design.yaml but table combustion (no Fortran).
+base: ../projects/e2_c1/design.yaml
+combustion: ../shared/cea_tables/e2_n2o_ethanol.yaml

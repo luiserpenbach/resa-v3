@@ -1,0 +1,3 @@
+# CI HF02 analyze case (table combustion).
+base: ../projects/e2_c1/hf02.yaml
+combustion: ../shared/cea_tables/e2_n2o_ethanol.yaml

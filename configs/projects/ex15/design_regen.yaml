@@ -1,0 +1,3 @@
+# EX15 design mode with high-fidelity regen cooling analysis
+base: design.yaml
+regen: regen.yaml

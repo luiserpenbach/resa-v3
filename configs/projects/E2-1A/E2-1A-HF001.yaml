@@ -1,0 +1,9 @@
+# Hot fire HF001 — eroded throat, reduced ox flow, lower measured eta
+base: asbuilt.yaml
+engine: "E2-1A-HF001"
+geometry:
+  throat_diameter_m: 0.028     # flat nozzle plate
+analyze_point:
+  mdot_ox_kg_s: 0.5
+  mdot_fuel_kg_s: 0.208
+  eta_cstar: 0.85

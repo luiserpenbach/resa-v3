@@ -1,0 +1,10 @@
+# CI analyze-mode case for design↔analyze round-trip tests.
+base: ../projects/e2_c1/asbuilt.yaml
+combustion: ../shared/cea_tables/e2_n2o_ethanol.yaml
+geometry:
+  throat_diameter_m: 0.027737775902836066
+  exit_diameter_m: null
+  eps: 4.423042075021141
+analyze_point:
+  mdot_ox_kg_s: 0.8326707662562874
+  mdot_fuel_kg_s: 0.20816769156407186

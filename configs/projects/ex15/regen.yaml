@@ -1,0 +1,82 @@
+# High-fidelity regen channel layout + solver for EX15 (H2/GOX, ε = 50).
+# Contour and hot-gas properties sync from the engine run by default.
+meta:
+  name: ex15_regen
+  description: >
+    EX15 15 kN H2/GOX regen — 72 channels, variable height, fixed rib,
+    hydrogen coolant (counterflow from nozzle end).
+  version: "0.1"
+
+contour:
+  type: from_engine
+
+sync:
+  contour: true
+  hot_gas_pc_bar: true
+  hot_gas_tc_K: true
+  hot_gas_gamma: true
+  hot_gas_mol_mass_kg_kmol: true
+  hot_gas_c_star_m_s: true
+  hot_gas_bartz_correction: true
+  of_ratio: true
+  mdot: true
+
+channels:
+  count: 80
+  # RESA contour: x = 0 at throat, chamber x < 0, nozzle x > 0.
+  inner_wall_thickness: 0.8e-3
+  height:
+    - [-0.390, 3.5e-3]       # chamber cylinder (L* region)
+    - [-0.120, 3.5e-3]
+    - [-0.040, 3.5e-3]       # convergent
+    - [0.000, 4.0e-3]        # throat
+    - [0.080, 3.5e-3]        # early divergent
+    - [0.250, 3.5e-3]
+  rib:
+    mode: fixed_width
+    width: 0.8e-3
+  helix:
+    profile:
+      - [-0.385, 0.0]        # axial in chamber
+      - [-0.100, 0.0]
+      - [-0.030, 28.0]       # spiral through throat / convergent
+      - [0.030, 28.0]
+      - [0.120, 0.0]         # axial in nozzle
+      - [0.420, 0.0]
+    interp: pchip
+    handedness: right
+  min_channel_width: 0.8e-3
+
+geometry:
+  n_stations: 400
+  width_reference: mid_height
+
+solver:
+  enabled: true
+  coolant: Hydrogen
+  mdot_from_engine: true
+  # Default mdot_from_engine uses O/F/(1+O/F) for oxidizer-side coolants (E2 N2O).
+  # H2 fuel-side regen needs the fuel mass fraction of engine mdot:
+  coolant_fraction: 0.153846   # 1 / (1 + 5.5)
+  inlet:
+    pressure_bar: 85.0
+    temperature_K: 90.0
+    location: nozzle_end
+  roughness: 6.0e-6
+  curvature_enhancement: true
+  wall:
+    material: "CuCrZr"
+    conductivity: 300.0
+    max_wall_temp_K: 1100.0
+
+export:
+  stl: true
+  stl_channels: all
+  step: true
+  step_channels: 0
+  centerlines_csv: true
+  geometry_csv: true
+  results_csv: true
+  html_3d: true
+  html_plots: true
+  color_3d_by: T_wall_hot

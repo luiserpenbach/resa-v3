@@ -1,0 +1,17 @@
+# ===== E2-1A - SN1 as-built (ANALYZE mode) =====
+# Reverse analysis: measured hardware + test mass flows -> resulting specs.
+base: design.yaml
+engine: "E2-1A-ASBUILT-SN1"
+
+operating_point: null
+
+geometry:
+  throat_diameter_m: 0.027903   # measured — update from SN1 CMM
+  exit_diameter_m: 0.052202
+
+analyze_point:
+  mdot_ox_kg_s: 0.81            # hot-fire baseline — update from SN1 test log
+  mdot_fuel_kg_s: 0.205
+  eta_cstar: 0.92
+  eta_cstar_tol: 0.03
+  p_amb_bar: 1.01325

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install RESA (core + plot + studio)
+        run: pip install -e ".[dev,plot,pdf,studio]"
+
+      - name: Run tests
+        run: pytest tests/ -q --ignore=tests/test_step_export.py
+
+  step-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with STEP deps
+        run: pip install -e ".[dev]" && pip install cadquery-ocp
+      - name: STEP export tests
+        run: pytest tests/test_step_export.py tests/test_channel_export.py -q

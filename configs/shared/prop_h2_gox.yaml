@@ -1,0 +1,8 @@
+# H2 / GOX — EX15 hydrogen fuel + gaseous oxygen
+name: "H2/GOX"
+oxidizer: "Oxygen"
+fuel: "Hydrogen"
+ox_temp_K: 250.0           # GOX delivery (ambient / pressurized gas bottle)
+fuel_temp_K: 120.0          # cold hydrogen feed (GH2 / warmed LH2 upstream of regen)
+cea_oxidizer: "O2"
+cea_fuel: "H2"

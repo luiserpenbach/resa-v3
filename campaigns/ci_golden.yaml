@@ -1,0 +1,7 @@
+# CI golden campaign — table backend, no Fortran
+name: ci_golden
+output: ci_golden_output
+rollup: true
+configs:
+  - ../configs/ci/e2_c1_design.yaml
+  - ../configs/ci/ex15_design.yaml

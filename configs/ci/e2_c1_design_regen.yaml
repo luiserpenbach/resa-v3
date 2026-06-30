@@ -1,0 +1,3 @@
+# CI design + regen (offline combustion table)
+base: e2_c1_design.yaml
+regen: ../projects/e2_c1/regen.yaml

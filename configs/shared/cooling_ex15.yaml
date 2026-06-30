@@ -1,0 +1,11 @@
+# EX15 regen cooling sanity block (H2 coolant, fuel-side channels)
+coolant: "Hydrogen"
+n_channels: 72
+channel_width_m: 0.0015
+channel_height_m: 0.0020
+rib_width_m: 0.00045
+inner_wall_thickness_m: 0.0008
+wall_material: "CuCrZr"
+inlet_T_K: 20.0
+inlet_p_bar: 70.0
+correlation: "gnielinski"

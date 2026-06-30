@@ -1,0 +1,93 @@
+engine: SPARK-50
+description: 50N hydrogen GOX thruster for vacuum applications
+propellants:
+  name: H2/GOX
+  oxidizer: Oxygen
+  fuel: Hydrogen
+  ox_temp_K: 250
+  fuel_temp_K: 400
+  cea_oxidizer: O2
+  cea_fuel: H2
+chamber:
+  contraction_ratio: 15
+  l_star_m: 0.8
+  contour: rao_bell
+  bell_fraction: 0.8
+  conv_half_angle_deg: 35
+  n_stations: 80
+  bartz_correction: 0.6
+cooling:
+  coolant: Hydrogen
+  n_channels: 14
+  channel_width_m: 0.0009
+  channel_height_m: 0.0008
+  rib_width_m: 0.0007
+  inner_wall_thickness_m: 0.0005
+  wall_material: IN718
+  inlet_T_K: 250
+  inlet_p_bar: 15
+  correlation: gnielinski
+combustion:
+  backend: rocketcea
+operating_point:
+  thrust_N: 50
+  pc_bar: 7
+  of_ratio: 4.2
+  eps: 80
+  eta_cstar: 0.95
+  eta_cf: 0.98
+  p_amb_bar: 0
+  pe_bar: null
+  eta_cstar_tol: 0.02
+analyze_point: null
+geometry: null
+offdesign:
+  ox_throttle: null
+  of_sweep:
+    of_range:
+    - 2
+    - 8
+    n: 15
+regen:
+  meta:
+    name: SPARK-50_regen
+    description: ''
+    version: '0.1'
+  contour:
+    type: from_engine
+  sync:
+    contour: true
+    hot_gas_pc_bar: true
+    hot_gas_tc_K: true
+    hot_gas_gamma: true
+    hot_gas_mol_mass_kg_kmol: true
+    hot_gas_c_star_m_s: true
+    hot_gas_bartz_correction: true
+    of_ratio: true
+    mdot: true
+  channels:
+    count: 14
+    inner_wall_thickness: 0.0005
+    height: 0.0008
+    rib:
+      mode: fixed_width
+      width: 0.0007
+    helix:
+      profile: 0
+      interp: pchip
+      handedness: right
+    min_channel_width: 0.0008
+  geometry:
+    n_stations: 300
+    width_reference: mid_height
+  solver:
+    enabled: true
+    coolant: Hydrogen
+    mdot_from_engine: true
+    inlet:
+      pressure_bar: 15
+      temperature_K: 250
+      location: nozzle_end
+  export:
+    stl: true
+    step: true

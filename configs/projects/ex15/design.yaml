@@ -1,0 +1,29 @@
+# ===== EX15 — 15 kN H2/GOX (DESIGN mode, vacuum) =====
+engine: "EX15"
+propellants: ../../shared/prop_h2_gox.yaml
+chamber: ../../shared/chamber_ex15.yaml
+cooling: ../../shared/cooling_ex15.yaml
+
+combustion:
+  backend: "rocketcea"
+
+operating_point:
+  thrust_N: 15000
+  pc_bar: 50.0
+  of_ratio: 5
+  eps: 20.0
+  eta_cstar: 0.95
+  eta_cf: 0.98
+  p_amb_bar: 0.0
+
+offdesign:
+  ox_throttle:
+    ox_fraction: [0.5, 1.1]
+    n: 25
+  of_sweep:
+    of_range: [4.0, 8.0]
+    n: 30
+  envelope:
+    throttle_fraction: [0.5, 1.1]
+    of_range: [4.0, 8.0]
+    n: [20, 20]

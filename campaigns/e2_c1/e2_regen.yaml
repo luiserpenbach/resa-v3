@@ -1,0 +1,16 @@
+# E2-C1 campaign with high-fidelity regen cooling
+name: e2_c1_regen
+output: e2_c1_output_regen
+rollup: true
+configs:
+  - ../../configs/projects/e2_c1/design_regen.yaml
+  - ../../configs/projects/e2_c1/asbuilt_regen.yaml
+  - ../../configs/projects/e2_c1/hf02_regen.yaml
+diffs:
+  - a: ../../configs/projects/e2_c1/asbuilt_regen.yaml
+    b: ../../configs/projects/e2_c1/hf02_regen.yaml
+    output: diff_asbuilt_vs_hf02.txt
+regen_diffs:
+  - a: ../../configs/projects/e2_c1/asbuilt_regen.yaml
+    b: ../../configs/projects/e2_c1/hf02_regen.yaml
+    output: regen_diff_asbuilt_vs_hf02.html

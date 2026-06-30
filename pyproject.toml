@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resa"
+version = "0.1.0"
+description = "Rocket Engine Sizing & Analysis — library-first, YAML-configured"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2", "CoolProp>=6.4", "pyyaml", "numpy>=2.0", "scipy", "pandas"]
+
+[project.optional-dependencies]
+cea = ["rocketcea"]
+plot = ["plotly"]
+pdf = ["matplotlib", "reportlab"]
+step = ["cadquery-ocp"]
+report = ["plotly", "matplotlib", "reportlab"]
+cad = ["cadquery-ocp"]
+studio = ["fastapi", "uvicorn[standard]", "httpx"]
+dev = ["pytest", "httpx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["resa*", "resa_studio*"]

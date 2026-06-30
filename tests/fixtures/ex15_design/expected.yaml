@@ -1,0 +1,40 @@
+config: configs/ci/ex15_design.yaml
+
+thrust_closes_N: 15000.0
+
+of_ratio: 5.0
+
+mdot_ox_kg_s: 2.9295089468301416
+
+mdot_fuel_kg_s: 0.5859017893660283
+
+throat_r_mm: 22.8755491185239
+
+isp_s: 418.1121919773292
+
+cf: 1.824854850121001
+
+eps: 20.0
+
+provenance:
+
+  thrust: input
+
+  pc: input
+
+  of_ratio: input
+
+  eps: input
+
+  mdot: calculated
+
+  geometry: calculated
+
+contour:
+
+  throat_radius_m: 0.0228755491185239
+
+  chamber_length_m: 0.16617619055325494
+
+  exit_mach: 3.9825678813918794
+

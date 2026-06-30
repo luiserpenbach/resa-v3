@@ -1,0 +1,24 @@
+config: configs/ci/e2_c1_design.yaml
+thrust_closes_N: 2200.0
+of_ratio: 4.0
+mdot_ox_kg_s: 0.8326707662562874
+mdot_fuel_kg_s: 0.20816769156407186
+throat_r_mm: 13.868887951418033
+isp_s: 215.53543219851238
+cf: 1.4562955436816072
+eps: 4.423042075021141
+provenance:
+  thrust: input
+  pc: input
+  of_ratio: input
+  eps: "optimized: pe = p_amb"
+  mdot: calculated
+  geometry: calculated
+contour:
+  throat_radius_m: 0.013868887951418033
+  chamber_length_m: 0.13335804450794597
+  exit_mach: 2.6396715647506546
+uncertainty:
+  eta_tol: 0.03
+  isp_lo: 208.51
+  isp_hi: 222.56

@@ -1,0 +1,11 @@
+# E2 C1 regen cooling channels (ethanol-cooled)
+coolant: "N2O"
+n_channels: 40            # 40×(1.2+1.0)=88 mm fits the 92.7 mm throat circumference
+channel_width_m: 0.0012
+channel_height_m: 0.0005
+rib_width_m: 0.0005
+inner_wall_thickness_m: 0.0005
+wall_material: "IN718"
+inlet_T_K: 280.0
+inlet_p_bar: 60.0
+correlation: "gnielinski"

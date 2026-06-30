@@ -1,0 +1,8 @@
+# N2O / Ethanol — E2 Drogon propellant definition
+name: "N2O/Ethanol"
+oxidizer: "NitrousOxide"
+fuel: "Ethanol"
+ox_temp_K: 285.0          # delivered N2O temp (self-pressurizing tank, cools on draw)
+fuel_temp_K: 293.15       # ethanol at ambient (pre-regen; coolant heats it downstream)
+cea_oxidizer: "N2O"
+cea_fuel: "C2H5OH"

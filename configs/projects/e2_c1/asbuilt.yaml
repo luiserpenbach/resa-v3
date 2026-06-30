@@ -1,0 +1,17 @@
+# ===== E2-C1 as-built (ANALYZE mode) =====
+# Reverse analysis: measured hardware + test mass flows -> resulting specs.
+base: design.yaml
+engine: "E2-C1-ASBUILT"
+
+operating_point: null         # clear design mode
+
+geometry:
+  throat_diameter_m: 0.027903   # measured throat diameter
+  exit_diameter_m: 0.052202     # (or give eps directly)
+
+analyze_point:
+  mdot_ox_kg_s: 0.81          # set on test stand
+  mdot_fuel_kg_s: 0.205
+  eta_cstar: 0.92
+  eta_cstar_tol: 0.03
+  p_amb_bar: 1.01325

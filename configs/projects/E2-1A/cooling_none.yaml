@@ -1,0 +1,12 @@
+# E2-1A has no active regen cooling. Placeholder satisfies RESA schema and
+# throat-circumference sanity checks only (not used in thermal sizing).
+coolant: "N2O"
+n_channels: 50
+channel_width_m: 0.0010
+channel_height_m: 0.0005
+rib_width_m: 0.0005
+inner_wall_thickness_m: 0.0005
+wall_material: "IN718"
+inlet_T_K: 285.0
+inlet_p_bar: 25.0
+correlation: "gnielinski"

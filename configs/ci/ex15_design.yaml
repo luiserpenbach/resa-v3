@@ -1,0 +1,3 @@
+# CI / offline golden baseline for EX15 (table combustion, no Fortran).
+base: ../projects/ex15/design.yaml
+combustion: ../shared/cea_tables/ex15_h2_gox.yaml

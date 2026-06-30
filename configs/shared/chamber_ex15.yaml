@@ -1,0 +1,8 @@
+# EX15 — 15 kN-class H2/GOX thrust chamber (ε = 50, vacuum)
+contraction_ratio: 7.0
+l_star_m: 0.9
+contour: "rao_bell"
+bell_fraction: 0.8
+conv_half_angle_deg: 40.0
+bartz_correction: 0.9
+n_stations: 120

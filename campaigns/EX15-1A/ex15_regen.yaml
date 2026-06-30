@@ -1,0 +1,6 @@
+# EX15 15 kN H2/GOX design + regen
+name: ex15_regen
+output: ex15_output_regen
+rollup: true
+configs:
+  - ../../configs/projects/ex15/design_regen.yaml

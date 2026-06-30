@@ -1,0 +1,8 @@
+# Hot fire 02: slightly eroded throat, reduced ox flow, lower measured eta
+base: asbuilt.yaml
+engine: "E2-C1-HF02"
+geometry:
+  throat_diameter_m: 0.028100     # +0.20 mm erosion
+analyze_point:
+  mdot_ox_kg_s: 0.8450
+  eta_cstar: 0.90

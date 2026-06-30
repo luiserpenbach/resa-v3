@@ -1,0 +1,12 @@
+# E2-1A campaign — design + as-built + HF001 (no regen)
+name: e2_1a
+output: e2_1a_output
+rollup: true
+configs:
+  - ../../configs/projects/E2-1A/design.yaml
+  - ../../configs/projects/E2-1A/asbuilt.yaml
+  - ../../configs/projects/E2-1A/E2-1A-HF001.yaml
+diffs:
+  - a: ../../configs/projects/E2-1A/asbuilt.yaml
+    b: ../../configs/projects/E2-1A/E2-1A-HF001.yaml
+    output: diff_sn1_vs_hf001.txt

@@ -1,0 +1,3 @@
+name: E2-C1
+description: E2 cluster 1 — N2O/ethanol design, as-built, and HF02 variants with optional regen.
+primary_config: design.yaml

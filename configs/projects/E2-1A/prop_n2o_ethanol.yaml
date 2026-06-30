@@ -1,0 +1,8 @@
+# N2O / Ethanol — E2-1A propellant definition
+name: "N2O/Ethanol"
+oxidizer: "NitrousOxide"
+fuel: "Ethanol"
+ox_temp_K: 285.0          # delivered N2O (self-pressurizing tank; no regen preheat)
+fuel_temp_K: 293.15       # ethanol at ambient temperature
+cea_oxidizer: "N2O"
+cea_fuel: "C2H5OH"

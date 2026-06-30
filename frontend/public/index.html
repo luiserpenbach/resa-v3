@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RESA Studio</title>
+  <script>
+    (function () {
+      var k = "resa-studio-theme";
+      var t = localStorage.getItem(k);
+      if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <h1>RESA Studio</h1>
+      <span class="topbar-tag">Sizing &amp; Analysis</span>
+    </div>
+    <div class="topbar-actions">
+      <label class="toggle-inline">
+        <input type="checkbox" id="auto-run" />
+        Auto-run
+      </label>
+      <button id="btn-validate" type="button">Validate</button>
+      <button id="btn-run-fast" type="button" class="btn-primary">Run fast</button>
+      <button id="btn-run-full" type="button">Full report</button>
+    </div>
+    <div class="topbar-end">
+      <button id="btn-theme" type="button" class="btn-theme" aria-label="Switch to light mode">Light</button>
+      <div id="health" class="health">Connecting…</div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Project browser">
+      <div class="sidebar-block" id="pinned-block">
+        <div class="sidebar-heading"><span>Pinned</span></div>
+        <nav id="pinned-nav" class="nav-tree nav-tree-compact">
+          <p class="placeholder">Pin configs from the list below.</p>
+        </nav>
+      </div>
+      <div class="sidebar-block" id="recent-block">
+        <div class="sidebar-heading"><span>Recent</span></div>
+        <nav id="recent-nav" class="nav-tree nav-tree-compact">
+          <p class="placeholder">—</p>
+        </nav>
+      </div>
+      <div class="sidebar-block">
+        <div class="sidebar-heading">
+          <span>Projects</span>
+          <button id="btn-new-project" type="button" class="btn-icon" title="New project">+</button>
+        </div>
+        <nav id="config-nav" class="nav-tree nav-projects">
+          <p class="placeholder">Loading…</p>
+        </nav>
+      </div>
+      <div class="sidebar-block">
+        <div class="sidebar-heading">
+          <span>Campaigns</span>
+          <button id="btn-refresh-campaigns" type="button" class="btn-icon" title="Refresh">↻</button>
+        </div>
+        <div id="campaigns-list" class="nav-runs">
+          <p class="placeholder">Loading…</p>
+        </div>
+      </div>
+      <div class="sidebar-block">
+        <div class="sidebar-heading"><span>Compare runs</span></div>
+        <div class="compare-panel">
+          <label class="compare-field">Run A
+            <select id="compare-run-a"><option value="">—</option></select>
+          </label>
+          <label class="compare-field">Run B
+            <select id="compare-run-b"><option value="">—</option></select>
+          </label>
+          <button id="btn-compare-runs" type="button" class="btn-compare">Compare</button>
+          <p class="form-hint compare-hint">Shift+click saved runs to pick A / B.</p>
+        </div>
+      </div>
+      <div class="sidebar-block sidebar-block-grow">
+        <div class="sidebar-heading">
+          <span>Saved runs</span>
+          <button id="btn-refresh-runs" type="button" class="btn-icon" title="Refresh">↻</button>
+        </div>
+        <div id="runs-list" class="nav-runs">
+          <p class="placeholder">Loading…</p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <div class="workspace-toolbar">
+        <div class="workspace-path">
+          <span class="workspace-label">Config</span>
+          <code id="active-config-path">—</code>
+        </div>
+        <div id="editor-validation" class="validation-badge">—</div>
+      </div>
+
+      <section class="card results-card">
+        <div class="card-header card-header-actions">
+          <h2>Results</h2>
+          <div id="results-source-badge" class="results-source-badge hidden"></div>
+        </div>
+        <div class="card-body">
+          <p id="results-empty" class="results-empty">Run fast or a full report to see results.</p>
+          <div id="warnings" class="warnings hidden"></div>
+          <div id="kpis" class="kpis"></div>
+          <div id="offdesign-sweeps" class="offdesign-sweeps hidden"></div>
+          <details id="compare-results" class="compare-results hidden">
+            <summary>Run comparison</summary>
+            <div id="compare-results-body"></div>
+          </details>
+          <details class="provenance-details">
+            <summary>Provenance</summary>
+            <table id="provenance-table">
+              <thead>
+                <tr><th>Quantity</th><th>Source</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </details>
+        </div>
+      </section>
+
+      <section class="card editor-card" id="editor-card">
+        <div class="card-header card-header-actions">
+          <div class="card-header-left">
+            <h2>Configuration</h2>
+            <span id="edit-mode-badge" class="edit-mode-badge">Viewing</span>
+          </div>
+          <div class="editor-actions">
+            <button id="btn-edit" type="button" class="btn-primary" disabled>Edit</button>
+            <button id="btn-save" type="button" class="hidden" disabled>Save changes</button>
+            <button id="btn-cancel" type="button" class="hidden">Cancel</button>
+          </div>
+        </div>
+        <p id="edit-hint" class="edit-hint hidden"></p>
+        <div class="card-body card-body-flush">
+          <div id="config-editor" class="config-editor">
+            <p class="placeholder">Select a config from the sidebar…</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card plots-card">
+        <div class="card-header card-header-actions">
+          <h2>Visualizations</h2>
+          <span id="plot-source-badge" class="plot-source-badge hidden"></span>
+        </div>
+        <div class="card-body">
+          <div id="plot-tabs" class="plot-tabs hidden"></div>
+          <iframe id="plot-frame" title="Plot" class="plot-frame hidden"></iframe>
+          <p id="plot-placeholder" class="placeholder">
+            Run a full report or open a saved run to view plots.
+          </p>
+        </div>
+      </section>
+
+      <pre id="status" class="status-bar hidden" aria-live="polite"></pre>
+    </main>
+
+    <aside class="artifacts-rail" aria-label="Artifacts">
+      <div class="rail-header">
+        <h2>Artifacts</h2>
+      </div>
+      <div id="artifacts-list" class="artifacts-list">
+        <p class="placeholder">No artifacts yet.</p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- hidden: kept for JS compatibility -->
+  <select id="config-path" class="hidden" aria-hidden="true"></select>
+
+  <dialog id="dialog-new-project" class="studio-dialog">
+    <form id="form-new-project" class="dialog-form">
+      <h3 class="dialog-title">New project</h3>
+      <label class="dialog-field">Name
+        <input name="name" type="text" required maxlength="80" placeholder="My engine" />
+      </label>
+      <label class="dialog-field">Folder id <span class="field-hint">(optional)</span>
+        <input name="slug" type="text" maxlength="48" placeholder="my-engine" />
+      </label>
+      <label class="dialog-field">Description
+        <textarea name="description" rows="2" placeholder="Short summary"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn-dialog-cancel">Cancel</button>
+        <button type="submit" class="btn-primary">Create project</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialog-new-config" class="studio-dialog">
+    <form id="form-new-config" class="dialog-form">
+      <h3 class="dialog-title">New config</h3>
+      <p id="new-config-project-label" class="form-hint"></p>
+      <label class="dialog-field">Config name
+        <input name="name" type="text" required maxlength="64" placeholder="asbuilt" />
+      </label>
+      <label class="dialog-field">Mode
+        <select name="mode">
+          <option value="design">Design</option>
+          <option value="analyze">Analyze (inherits design.yaml)</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn-dialog-cancel">Cancel</button>
+        <button type="submit" class="btn-primary">Create config</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/assets/workspace-preview.js"></script>
+  <script src="/assets/regen-editor.js"></script>
+  <script src="/assets/regen-design.js"></script>
+  <script src="/assets/studio-p2.js"></script>
+  <script src="/assets/config-editor.js"></script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

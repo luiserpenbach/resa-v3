@@ -1,0 +1,8 @@
+# E2 thrust chamber geometry
+contraction_ratio: 12.0
+l_star_m: 1.2
+contour: "rao_bell"
+bell_fraction: 0.8
+conv_half_angle_deg: 35.0
+bartz_correction: 0.8      # your validated small-engine correction
+n_stations: 100
