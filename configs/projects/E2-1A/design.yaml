@@ -1,29 +1,109 @@
-# ===== E2-1A baseline engine (DESIGN mode) =====
-engine: "E2-1A"
-propellants: prop_n2o_ethanol.yaml
-chamber: chamber_E2_TC_01.yaml
-cooling: cooling_none.yaml
-
+engine: E2-1A
+propellants:
+  name: N2O/Ethanol
+  oxidizer: NitrousOxide
+  fuel: Ethanol
+  ox_temp_K: 285
+  fuel_temp_K: 293.15
+  cea_oxidizer: N2O
+  cea_fuel: C2H5OH
+chamber:
+  contraction_ratio: 12
+  l_star_m: 1.2
+  contour: rao_bell
+  conv_half_angle_deg: 40
+  bartz_correction: 0.8
+  n_stations: 50
+cooling:
+  coolant: N2O
+  n_channels: 50
+  channel_width_m: 0.001
+  channel_height_m: 0.0005
+  rib_width_m: 0.0005
+  inner_wall_thickness_m: 0.0005
+  wall_material: IN718
+  inlet_T_K: 285
+  inlet_p_bar: 25
+  correlation: gnielinski
 combustion:
-  backend: "rocketcea"
-
+  backend: rocketcea
 operating_point:
   thrust_N: 2200
-  pc_bar: 25.0
-  of_ratio: 4.0
-  eta_cstar: 0.92
-  eta_cstar_tol: 0.05
-  # eta_cf: 0.98              # omit -> 1.0 (nozzle CF efficiency)
+  pc_bar: 25
+  of_ratio: 4
+  eta_cstar: 0.93
+  eta_cstar_tol: 0.03
+  eta_cf: 0.97
   p_amb_bar: 1.01325
-
 offdesign:
   ox_throttle:
-    ox_fraction: [0.4, 1.1]
+    ox_fraction:
+    - 0.4
+    - 1.1
     n: 27
   of_sweep:
-    of_range: [1.5, 6.0]
+    of_range:
+    - 1.5
+    - 6
     n: 36
   envelope:
-    throttle_fraction: [0.4, 1.1]
-    of_range: [1.5, 6.0]
-    n: [22, 22]
+    throttle_fraction:
+    - 0.4
+    - 1.1
+    of_range:
+    - 1.5
+    - 6
+    n:
+    - 22
+    - 22
+description: Hopper E2 - Initial regenerative engine analysis
+regen:
+  meta:
+    name: E2-1A_regen
+    description: Circuit 1
+    version: '0.1'
+  contour:
+    type: from_engine
+  sync:
+    contour: true
+    hot_gas_pc_bar: true
+    hot_gas_tc_K: true
+    hot_gas_gamma: true
+    hot_gas_mol_mass_kg_kmol: true
+    hot_gas_c_star_m_s: true
+    hot_gas_bartz_correction: true
+    of_ratio: true
+    mdot: true
+  channels:
+    count: 50
+    start_x: null
+    stop_x: null
+    inner_wall_thickness: 0.0005
+    height: 0.0005
+    rib:
+      mode: fixed_width
+      width: 0.0005
+    helix:
+      profile: 0
+      interp: pchip
+      handedness: right
+    min_channel_width: 0.0008
+  geometry:
+    n_stations: 100
+    width_reference: mid_height
+  solver:
+    enabled: true
+    coolant: N2O
+    coolant_side: oxidizer
+    mdot_from_engine: true
+    inlet:
+      pressure_bar: 80
+      temperature_K: 285
+      location: nozzle_end
+    wall:
+      material: IN718
+      max_wall_temp_K: 1200
+    curvature_enhancement: false
+  export:
+    stl: false
+    step: false

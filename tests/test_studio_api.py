@@ -268,6 +268,29 @@ def test_save_config(client):
         out_file.write_text(original, encoding="utf-8")
 
 
+def test_save_preserves_yaml_file_refs(client):
+    """Saving a resolved config must not inline unchanged fragment YAML paths."""
+    from resa_studio.settings import REPO_ROOT
+
+    save_target = "configs/projects/E2-1A/design.yaml"
+    resolved = client.get("/api/config/resolve", params={"config_path": save_target}).json()
+    out_file = REPO_ROOT / save_target
+    original = out_file.read_text(encoding="utf-8")
+    try:
+        r = client.post(
+            "/api/config/save",
+            json={"config_path": save_target, "config": resolved["config"]},
+        )
+        assert r.status_code == 200
+        saved = out_file.read_text(encoding="utf-8")
+        assert "propellants: prop_n2o_ethanol.yaml" in saved
+        assert "chamber: chamber_E2_TC_01.yaml" in saved
+        assert "analyze_point:" not in saved
+        assert "geometry:" not in saved
+    finally:
+        out_file.write_text(original, encoding="utf-8")
+
+
 def test_campaigns_list(client):
     r = client.get("/api/campaigns/list")
     assert r.status_code == 200

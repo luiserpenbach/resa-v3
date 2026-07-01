@@ -51,13 +51,41 @@ def _diff_overlay(base: Any, updated: Any) -> dict[str, Any] | None:
     return out or None
 
 
+def _preserve_file_refs(
+    path: Path,
+    payload: dict[str, Any],
+    clean: dict[str, Any],
+    raw_on_disk: dict[str, Any],
+) -> None:
+    """Restore ``key: fragment.yaml`` strings when resolved content is unchanged."""
+    for key in _REF_KEYS:
+        raw_val = raw_on_disk.get(key)
+        if not isinstance(raw_val, str) or not raw_val.endswith((".yaml", ".yml")):
+            continue
+        ref_resolved = resolve_file_ref(raw_val, path.parent)
+        if _deep_equal(clean.get(key), ref_resolved):
+            payload[key] = raw_val
+        elif key in payload and _deep_equal(payload[key], ref_resolved):
+            payload[key] = raw_val
+
+
+def _strip_ui_null_mode_blocks(payload: dict[str, Any], raw_on_disk: dict[str, Any]) -> None:
+    """Drop null mode blocks the editor injects but were not on disk originally."""
+    for key in ("analyze_point", "geometry", "operating_point"):
+        if payload.get(key) is None and key not in raw_on_disk:
+            payload.pop(key, None)
+
+
 def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     """Build YAML body: full config, or thin ``base:`` overlay when applicable."""
     clean = {k: v for k, v in data.items() if k != "config_hash"}
     raw_on_disk = read_raw_config(path)
     base_ref = raw_on_disk.get("base")
     if not base_ref:
-        return clean
+        payload = dict(clean)
+        _preserve_file_refs(path, payload, clean, raw_on_disk)
+        _strip_ui_null_mode_blocks(payload, raw_on_disk)
+        return payload
 
     inherited = load_inherited_dict(path)
     overlay = _diff_overlay(inherited, clean) or {}
@@ -68,16 +96,7 @@ def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
         if val is None:
             overlay[key] = None
 
-    # Keep file-reference strings when the resolved content is unchanged.
-    for key in _REF_KEYS:
-        raw_val = raw_on_disk.get(key)
-        if not isinstance(raw_val, str) or not raw_val.endswith((".yaml", ".yml")):
-            continue
-        ref_resolved = resolve_file_ref(raw_val, path.parent)
-        if _deep_equal(clean.get(key), ref_resolved):
-            overlay[key] = raw_val
-        elif key in overlay and _deep_equal(overlay[key], ref_resolved):
-            overlay[key] = raw_val
+    _preserve_file_refs(path, overlay, clean, raw_on_disk)
 
     # Drop inherited-equal branches (except base and explicit nulls).
     for key in list(overlay):
@@ -95,6 +114,7 @@ def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
             if key != "base" and key not in overlay:
                 overlay[key] = clean.get(key, val)
 
+    _strip_ui_null_mode_blocks(overlay, raw_on_disk)
     return overlay
 
 
