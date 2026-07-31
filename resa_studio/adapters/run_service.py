@@ -9,7 +9,7 @@ from resa.config.schema import EngineConfig
 from resa.pipeline import run as pipeline_run
 from resa.reporting.report import write_report
 
-from ..settings import OUT_ROOT, REPO_ROOT
+from ..settings import OUT_ROOT, REPO_ROOT, rel_to
 from .config_service import ConfigService
 from .result_serializer import result_to_dict
 
@@ -59,8 +59,7 @@ class RunService:
         return RunOutput(
             mode="fast",
             config=cfg,
-            config_path=str(path.relative_to(self.repo_root)).replace("\\", "/")
-            if path else None,
+            config_path=rel_to(path, self.repo_root) if path else None,
             outdir=None,
             result=result_to_dict(res),
             artifacts=(),
@@ -84,8 +83,7 @@ class RunService:
         return RunOutput(
             mode="full",
             config=cfg,
-            config_path=str(path.relative_to(self.repo_root)).replace("\\", "/")
-            if path else None,
+            config_path=rel_to(path, self.repo_root) if path else None,
             outdir=outdir,
             result=result_to_dict(res),
             artifacts=artifacts,
@@ -115,7 +113,7 @@ class RunService:
             runs.append({
                 "engine": engine,
                 "config_hash": config_hash,
-                "outdir": str(outdir.relative_to(self.repo_root)).replace("\\", "/"),
+                "outdir": rel_to(outdir, self.repo_root),
                 "mode": data.get("mode", "full"),
                 "thrust_N": tc.get("thrust_N"),
                 "isp_s": tc.get("isp_s"),
@@ -176,7 +174,7 @@ class RunService:
         if cfg_resolved.is_file():
             with cfg_resolved.open(encoding="utf-8") as f:
                 config_dict = yaml.safe_load(f) or {}
-            config_source = str(cfg_resolved.relative_to(self.repo_root)).replace("\\", "/")
+            config_source = rel_to(cfg_resolved, self.repo_root)
             try:
                 cfg = EngineConfig.model_validate(config_dict)
                 analysis_mode = cfg.mode
@@ -196,7 +194,7 @@ class RunService:
             "config": config_dict,
             "config_source": config_source,
             **path_info,
-            "outdir": str(outdir.relative_to(self.repo_root)).replace("\\", "/"),
+            "outdir": rel_to(outdir, self.repo_root),
             "summary": self._summary_from_results(data),
             "warnings": list(data.get("warnings") or []),
             "provenance": dict(tc.get("provenance") or {}),

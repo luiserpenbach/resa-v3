@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from resa_studio.adapters.config_service import ConfigService
 from resa_studio.adapters.run_service import RunService
+from resa_studio.settings import rel_to
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 _runs = RunService()
@@ -38,7 +39,7 @@ def _run_output(out) -> RunResponse:
         engine=out.config.engine,
         config_hash=out.config.config_hash,
         config_path=out.config_path,
-        outdir=str(out.outdir.relative_to(_runs.repo_root)).replace("\\", "/")
+        outdir=rel_to(out.outdir, _runs.repo_root)
         if out.outdir else None,
         summary=out.result["summary"],
         warnings=out.result["warnings"],

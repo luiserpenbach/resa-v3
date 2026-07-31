@@ -6,7 +6,7 @@ from typing import Any
 
 from resa.campaign import load_campaign, run_campaign
 
-from ..settings import OUT_ROOT, REPO_ROOT
+from ..settings import OUT_ROOT, REPO_ROOT, rel_to
 
 
 class CampaignService:
@@ -47,7 +47,7 @@ class CampaignService:
             raise FileNotFoundError(f"campaign not found: {campaign_path}")
         spec = load_campaign(path)
         out_root = run_campaign(path, out_root=self.out_root, verbose=False)
-        rel_out = out_root.relative_to(self.repo_root).as_posix()
+        rel_out = rel_to(out_root, self.repo_root)
         artifacts = sorted(
             p.relative_to(out_root).as_posix()
             for p in out_root.rglob("*")
@@ -56,7 +56,7 @@ class CampaignService:
         return {
             "ok": True,
             "name": spec.name,
-            "campaign_path": path.relative_to(self.repo_root).as_posix(),
+            "campaign_path": rel_to(path, self.repo_root),
             "outdir": rel_out,
             "n_configs": len(spec.configs),
             "artifacts": artifacts[:200],

@@ -8,7 +8,7 @@ import yaml
 
 from resa.reporting.diff import diff_dicts
 
-from ..settings import OUT_ROOT, REPO_ROOT
+from ..settings import OUT_ROOT, REPO_ROOT, rel_to
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -61,13 +61,13 @@ class CompareService:
             "a": {
                 "engine": res_a.get("engine", engine_a),
                 "config_hash": res_a.get("config_hash", config_hash_a),
-                "outdir": str(dir_a.relative_to(self.repo_root)).replace("\\", "/"),
+                "outdir": rel_to(dir_a, self.repo_root),
                 "mode": res_a.get("mode"),
             },
             "b": {
                 "engine": res_b.get("engine", engine_b),
                 "config_hash": res_b.get("config_hash", config_hash_b),
-                "outdir": str(dir_b.relative_to(self.repo_root)).replace("\\", "/"),
+                "outdir": rel_to(dir_b, self.repo_root),
                 "mode": res_b.get("mode"),
             },
             "config_diff": _rows_to_json(diff_dicts(cfg_a, cfg_b)),
