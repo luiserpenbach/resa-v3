@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
@@ -175,7 +176,8 @@ def test_get_run_includes_config(client):
     assert body["analysis_mode"] == "design"
     assert body["config"]["operating_point"]["thrust_N"] > 0
     assert body["config_source"] is not None
-    assert body.get("writable") is True
+    # Run snapshots are read-only: save_config only accepts configs/projects/.
+    assert body.get("writable") is False
 
 
 def test_preview_contour(client):
@@ -285,10 +287,66 @@ def test_save_preserves_yaml_file_refs(client):
         saved = out_file.read_text(encoding="utf-8")
         assert "propellants: prop_n2o_ethanol.yaml" in saved
         assert "chamber: chamber_E2_TC_01.yaml" in saved
-        assert "analyze_point:" not in saved
-        assert "geometry:" not in saved
+        saved_doc = yaml.safe_load(saved)
+        assert "analyze_point" not in saved_doc
+        assert "geometry" not in saved_doc
     finally:
         out_file.write_text(original, encoding="utf-8")
+
+
+def test_save_overlay_edit_wins_over_explicit_null(client):
+    """Editing a key that is explicitly null on disk must keep the edit."""
+    from resa_studio.settings import REPO_ROOT
+
+    save_target = "configs/projects/E2-1A/asbuilt.yaml"
+    resolved = client.get("/api/config/resolve", params={"config_path": save_target}).json()
+    out_file = REPO_ROOT / save_target
+    original = out_file.read_text(encoding="utf-8")
+
+    # asbuilt.yaml has `operating_point: null` — switch it back to design mode.
+    cfg = dict(resolved["config"])
+    cfg["operating_point"] = {
+        "thrust_N": 2400, "pc_bar": 26.0, "of_ratio": 4.0, "eta_cstar": 0.93,
+    }
+    cfg["analyze_point"] = None
+    cfg["geometry"] = None
+    try:
+        r = client.post(
+            "/api/config/save",
+            json={"config_path": save_target, "config": cfg},
+        )
+        assert r.status_code == 200
+        saved_doc = yaml.safe_load(out_file.read_text(encoding="utf-8"))
+        assert saved_doc["operating_point"] is not None
+        assert saved_doc["operating_point"]["thrust_N"] == 2400
+        re_resolved = client.get(
+            "/api/config/resolve", params={"config_path": save_target}
+        ).json()
+        assert re_resolved["config"]["operating_point"]["thrust_N"] == 2400
+    finally:
+        out_file.write_text(original, encoding="utf-8")
+
+
+def test_save_overlay_keeps_ref_equal_to_inherited(client):
+    """A fragment ref whose content equals the inherited value must survive a save."""
+    from resa_studio.settings import REPO_ROOT
+
+    thin = REPO_ROOT / "configs/projects/E2-1A/_test_thin.yaml"
+    thin.write_text(
+        "base: design.yaml\nchamber: chamber_E2_TC_01.yaml\n", encoding="utf-8"
+    )
+    rel = "configs/projects/E2-1A/_test_thin.yaml"
+    try:
+        resolved = client.get("/api/config/resolve", params={"config_path": rel}).json()
+        r = client.post(
+            "/api/config/save",
+            json={"config_path": rel, "config": resolved["config"]},
+        )
+        assert r.status_code == 200
+        saved = thin.read_text(encoding="utf-8")
+        assert "chamber: chamber_E2_TC_01.yaml" in saved
+    finally:
+        thin.unlink(missing_ok=True)
 
 
 def test_campaigns_list(client):

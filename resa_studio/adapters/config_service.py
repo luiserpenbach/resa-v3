@@ -90,13 +90,13 @@ def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     inherited = load_inherited_dict(path)
     overlay = _diff_overlay(inherited, clean) or {}
 
-    # Preserve relative base path and explicit nulls (e.g. operating_point: null).
+    # Preserve the relative base path, and explicit nulls (e.g.
+    # operating_point: null) only while the edited config still has no value
+    # there — a user edit to a nulled key must win over the null on disk.
     overlay["base"] = base_ref
     for key, val in raw_on_disk.items():
-        if val is None:
+        if val is None and clean.get(key) is None:
             overlay[key] = None
-
-    _preserve_file_refs(path, overlay, clean, raw_on_disk)
 
     # Drop inherited-equal branches (except base and explicit nulls).
     for key in list(overlay):
@@ -107,6 +107,10 @@ def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
             continue
         if _deep_equal(clean.get(key), inherited.get(key)):
             del overlay[key]
+
+    # Restore fragment refs after the drop above, so a ref pin whose content
+    # happens to equal the inherited value is kept rather than deleted.
+    _preserve_file_refs(path, overlay, clean, raw_on_disk)
 
     if len(overlay) == 1 and "base" in overlay:
         # Only base left — keep any keys that were in the original thin file.
@@ -144,9 +148,10 @@ class ConfigService:
 
     def _path_info(self, path: Path) -> dict[str, Any]:
         rel = self._rel(path)
-        writable = rel.startswith("configs/projects/") or (
-            rel.startswith("out/") and path.name == "config_resolved.yaml"
-        )
+        # Run snapshots (out/**/config_resolved.yaml) are read-only: save_config
+        # only accepts configs/projects/ paths, so advertising them as writable
+        # produced an Edit flow whose Save always failed.
+        writable = rel.startswith("configs/projects/")
         return {
             "writable": writable,
             "save_path": rel,

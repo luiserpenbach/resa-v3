@@ -1,7 +1,8 @@
-# E2-1A thrust chamber — conical contour (TC-01 drawing set)
+# E2-1A thrust chamber — TC-01, Rao bell contour (regen baseline)
+# Note: earlier TC-01 revision was conical (59°); current design uses a bell.
 contraction_ratio: 12.0
 l_star_m: 1.2
-contour: "conical"
-conv_half_angle_deg: 59.0    # target 60°; schema requires < 60
+contour: "rao_bell"
+conv_half_angle_deg: 40.0
 bartz_correction: 0.8
-n_stations: 100
+n_stations: 50
