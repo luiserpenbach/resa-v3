@@ -630,6 +630,39 @@ If import still fails, try the matching STL file instead.
 
 ---
 
+## Film cooling (`film_cooling:`, first-order)
+
+```yaml
+film_cooling:
+  fraction: 0.05               # of TOTAL propellant mdot injected as film
+  side: fuel                   # fuel | oxidizer (which flow supplies it)
+  injection_x_m: null          # axial station; default = injector face
+  effectiveness_length_m: 0.10 # decay length of the wall-relief effect [m]
+  film_temp_K: 600.0           # effective near-wall film gas temperature
+```
+
+Explicitly first-order — all limitations appear as run warnings:
+
+- The film **does not combust**: the core burns at a shifted O/F
+  (`OF_core = OF / (1 − f·(1+OF))` for a fuel film), so `of_ratio` must be
+  explicit (the max-Isp search is not film-aware) and the shifted O/F must
+  stay inside the combustion table.
+- The film **produces no thrust**: delivered Isp = core Isp × (1 − fraction)
+  (conservative bound). `summary()` gains `film_*` columns including
+  `film_isp_delivered_s`; `isp_s` remains the core value.
+- Wall relief enters the regen solve as an adiabatic-wall-temperature
+  reduction: η(x) = exp(−(x − x_inj)/L) downstream of the injection station,
+  `T_aw_eff = η·film_temp_K + (1−η)·T_aw`. The decay length is **user-set**
+  — it is *not* derived from `fraction`.
+- Off-design sweeps model the core flow only.
+
+Design mode: thrust target is met by the core; tank-side totals derive from
+the film fraction. Analyze mode: film flow is subtracted from the measured
+side flow before the kernel, so pc/thrust reflect the combusting core while
+delivered Isp uses the measured total.
+
+---
+
 ## Workflows
 
 ### Engine sizing only

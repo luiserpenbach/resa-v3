@@ -154,7 +154,8 @@ def _regen_kpis(cfg: EngineConfig, res) -> dict[str, Any]:
     from .regen_channels.solver import RegenSolver
 
     regen = prepare_regen_config(
-        cfg.regen, res.thrust_chamber, res.combustion, cfg.chamber)
+        cfg.regen, res.thrust_chamber, res.combustion, cfg.chamber,
+        film=cfg.film_cooling)
     if not regen.solver.enabled:
         return {}
     lay = ChannelLayout(_build_contour(regen, res.contour), regen)

@@ -119,6 +119,18 @@ class RegenSolver:
         M = hot.mach_profile(lay.x, lay.r, lay.x_throat)
         T_aw = hot.t_aw(M)
 
+        if self.cfg.film is not None:
+            # first-order film relief: exponential effectiveness decay
+            # downstream of the injection station (see FilmCfg)
+            fc = self.cfg.film
+            x_inj = (fc.injection_x_m if fc.injection_x_m is not None
+                     else float(lay.x.min()))
+            downstream = np.maximum(lay.x - x_inj, 0.0)
+            eta = np.where(
+                lay.x >= x_inj,
+                np.exp(-downstream / fc.effectiveness_length_m), 0.0)
+            T_aw = eta * fc.film_temp_K + (1.0 - eta) * T_aw
+
         if self.cfg.inlet.location == "nozzle_end":
             idx = np.arange(n - 1, -1, -1)        # counterflow (typical)
         else:

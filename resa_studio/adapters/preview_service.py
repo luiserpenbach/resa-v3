@@ -110,7 +110,9 @@ def _synth_regen(cfg: EngineConfig) -> RegenConfig:
 
 def _build_layout(cfg: EngineConfig, result) -> ChannelLayout:
     regen = cfg.regen if cfg.regen is not None else _synth_regen(cfg)
-    regen = prepare_regen_config(regen, result.thrust_chamber, result.combustion, cfg.chamber)
+    regen = prepare_regen_config(
+        regen, result.thrust_chamber, result.combustion, cfg.chamber,
+        film=cfg.film_cooling)
     contour = contour_from_resa(result.contour)
     return ChannelLayout(contour, regen)
 
@@ -226,6 +228,7 @@ def preview_regen_thermal(
         raise ValueError("Config has no regen block")
     regen = prepare_regen_config(
         cfg.regen, result.thrust_chamber, result.combustion, cfg.chamber,
+        film=cfg.film_cooling,
     )
     if not regen.solver.enabled:
         return {
