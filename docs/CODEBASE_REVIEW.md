@@ -6,13 +6,15 @@
 > `n_stations` honored, regen biases and the energy-closure diagnostic fixed,
 > PDF envelope orientation fixed, frontend canvas/XSS/leak fixes and dead-code
 > removal, strict regen schema, CORS restricted, tests green (90 passed).
-> Items NOT addressed (still open, lower priority): preview-cache
-> timestamp/thundering-herd behavior, campaign-service path confinement,
-> `RESA_*_ROOT` env overrides outside the repo root, save comment
-> destruction / concurrency guard, design-mode uncertainty-band semantics,
-> `cooling.correlation`/`mdot_coolant_kg_s` schema fields (kept for
-> compatibility; still unused), and the remaining §5 low items not listed
-> above.
+> A follow-up batch also fixed the preview-cache timestamp/thundering-herd
+> behavior and the `RESA_*_ROOT` env overrides outside the repo root (plus
+> the prefix-containment checks).
+> Items NOT addressed (still open, lower priority): campaign-service path
+> confinement and artifact listing, save comment destruction / concurrency
+> guard, disjoint off-design sweep ranges, design-mode uncertainty-band
+> semantics, `cooling.correlation`/`mdot_coolant_kg_s` schema fields (kept
+> for compatibility; still unused), and the remaining §5 low items not
+> listed above.
 
 Deep review of bugs, workflow errors, unused code, and feature effectiveness,
 covering the core physics (`resa/models`, `resa/properties`, `resa/pipeline.py`),
