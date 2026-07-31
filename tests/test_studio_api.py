@@ -455,6 +455,35 @@ def test_preview_regen_thermal(client):
     if not body.get("skipped"):
         assert body["summary"]["T_wall_max_K"] > 0
         assert len(body["profiles"]["x_m"]) > 10
+        # margin contract for the margin plot
+        s = body["summary"]
+        assert s["wall_limit_K"] > 0
+        assert s["min_margin_K"] == pytest.approx(
+            s["wall_limit_K"] - s["T_wall_max_K"], abs=0.2)
+        prof = body["profiles"]
+        assert len(prof["margin_K"]) == len(prof["x_m"])
+        assert len(prof["T_cool_K"]) == len(prof["x_m"])
+        assert min(prof["margin_K"]) == pytest.approx(s["min_margin_K"], abs=0.2)
+
+
+def test_preview_regen_thermal_fidelity(client):
+    pytest.importorskip("CoolProp")
+    resolved = client.get(
+        "/api/config/resolve",
+        params={"config_path": "configs/ci/e2_c1_design_regen.yaml"},
+    ).json()
+    coarse = client.post(
+        "/api/preview/regen/thermal",
+        json={"config": resolved["config"], "fidelity": "preview"},
+    ).json()
+    full = client.post(
+        "/api/preview/regen/thermal",
+        json={"config": resolved["config"], "fidelity": "full"},
+    ).json()
+    assert coarse["ok"] and full["ok"]
+    assert full["preview_stations"] == full["full_stations"]
+    assert coarse["preview_stations"] < full["full_stations"]
+    assert len(full["profiles"]["x_m"]) == full["full_stations"]
 
 
 def test_save_config(client):

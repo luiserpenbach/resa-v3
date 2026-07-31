@@ -210,8 +210,14 @@ def export_channel(
     return path
 
 
-def preview_regen_thermal(data: dict[str, Any]) -> dict[str, Any]:
-    """Fast regen thermal solve for the design workspace (reduced station count)."""
+def preview_regen_thermal(
+    data: dict[str, Any], fidelity: str = "preview"
+) -> dict[str, Any]:
+    """Regen thermal solve for the design workspace.
+
+    fidelity="preview" solves on a reduced station count for fast editing
+    feedback; fidelity="full" uses the config's geometry.n_stations.
+    """
     from resa.regen.integration import _build_contour
     from resa.regen_channels.solver import RegenSolver
 
@@ -229,7 +235,10 @@ def preview_regen_thermal(data: dict[str, Any]) -> dict[str, Any]:
         }
 
     n_full = regen.geometry.n_stations
-    n_preview = min(80, max(40, n_full // 3))
+    if fidelity == "full":
+        n_preview = n_full
+    else:
+        n_preview = min(80, max(40, n_full // 3))
     if n_preview < n_full:
         regen = regen.model_copy(update={
             "geometry": regen.geometry.model_copy(update={"n_stations": n_preview}),
@@ -246,14 +255,16 @@ def preview_regen_thermal(data: dict[str, Any]) -> dict[str, Any]:
     attrs = results.attrs
     if attrs.get("saturation_reached"):
         warnings.append("Bulk coolant reached saturation in part of the circuit")
+    wall_limit = float(regen.solver.wall.max_wall_temp_K)
     t_max = float(results.T_wall_hot_K.max())
-    if t_max > regen.solver.wall.max_wall_temp_K:
-        warnings.append(
-            f"Hot wall exceeds {regen.solver.wall.max_wall_temp_K:.0f} K limit"
-        )
+    i_hot = int(results.T_wall_hot_K.idxmax())
+    min_margin = wall_limit - t_max
+    if t_max > wall_limit:
+        warnings.append(f"Hot wall exceeds {wall_limit:.0f} K limit")
 
     return {
         "ok": True,
+        "fidelity": "full" if n_preview == n_full else "preview",
         "preview_stations": n_preview,
         "full_stations": n_full,
         "summary": {
@@ -262,15 +273,23 @@ def preview_regen_thermal(data: dict[str, Any]) -> dict[str, Any]:
             "outlet_T_K": round(float(attrs["outlet_T_K"]), 2),
             "outlet_p_bar": round(float(attrs["outlet_p_bar"]), 2),
             "T_wall_max_K": round(t_max, 1),
+            "wall_limit_K": round(wall_limit, 1),
+            "min_margin_K": round(min_margin, 1),
+            "x_at_T_wall_max_m": round(float(results.x_m.iloc[i_hot]), 5),
             "saturation_reached": bool(attrs.get("saturation_reached")),
         },
         "profiles": {
-            "x_m": lay.x.tolist(),
+            "x_m": results.x_m.tolist(),
             "T_wall_hot_K": results.T_wall_hot_K.tolist(),
+            "margin_K": (wall_limit - results.T_wall_hot_K).tolist(),
+            "T_cool_K": results.T_cool_K.tolist(),
+            "T_sat_K": results.T_sat_K.tolist(),
+            "quality": results.quality.tolist(),
             "p_cool_bar": results.p_cool_bar.tolist(),
             "q_w_W_m2": results.q_w_W_m2.tolist(),
             "v_m_s": results.v_m_s.tolist(),
         },
+        "wall_limit_K": wall_limit,
         "warnings": warnings,
     }
 

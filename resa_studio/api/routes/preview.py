@@ -34,10 +34,16 @@ def preview_cache_stats() -> dict[str, Any]:
     return preview_service.preview_cache_stats()
 
 
+class RegenThermalBody(ConfigBody):
+    fidelity: Literal["preview", "full"] = "preview"
+
+
 @router.post("/regen/thermal")
-def regen_thermal(body: ConfigBody) -> dict[str, Any]:
+def regen_thermal(body: RegenThermalBody) -> dict[str, Any]:
     try:
-        return preview_service.preview_regen_thermal(body.config)
+        return preview_service.preview_regen_thermal(
+            body.config, fidelity=body.fidelity
+        )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=preview_service.format_validation_error(exc)) from exc
     except Exception as exc:
