@@ -41,7 +41,8 @@ const state = {
   editSession: null,
   loadSeq: 0,
   lastRunData: null,
-  savedRuns: [],
+  runsList: [],
+  runSort: { key: "modified_at", dir: "desc" },
   compareA: null,
   compareB: null,
   plotSource: null,
@@ -93,6 +94,10 @@ const els = {
   btnRunFast: document.getElementById("btn-run-fast"),
   btnRunFull: document.getElementById("btn-run-full"),
   btnRefreshRuns: document.getElementById("btn-refresh-runs"),
+  btnPinBaseline: document.getElementById("btn-pin-baseline"),
+  runMetaEditor: document.getElementById("run-meta-editor"),
+  runNoteInput: document.getElementById("run-note-input"),
+  btnSaveNote: document.getElementById("btn-save-note"),
 };
 
 /** Escape a dynamic value before interpolating it into innerHTML. */
@@ -224,6 +229,21 @@ function formatRunTime(ts) {
   return new Date(ts * 1000).toLocaleString(undefined, {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+}
+
+/** Compact relative age, e.g. "5m", "3h", "2d"; falls back to a short date. */
+function formatAge(ts) {
+  const sec = Math.max(0, Date.now() / 1000 - ts);
+  if (sec < 60) return "now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+  if (sec < 7 * 86400) return `${Math.floor(sec / 86400)}d`;
+  return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Fixed-decimal number, em-dash for null/non-finite. */
+function fmtNum(v, dec) {
+  return v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(dec);
 }
 
 function projectSlugFromPath(path) {
@@ -440,12 +460,12 @@ function highlightConfigNav() {
 }
 
 function highlightActiveRun() {
-  for (const btn of els.runsList.querySelectorAll(".nav-item-run")) {
+  for (const row of els.runsList.querySelectorAll(".run-row")) {
     const active =
       state.activeRun &&
-      btn.dataset.engine === state.activeRun.engine &&
-      btn.dataset.hash === state.activeRun.config_hash;
-    btn.classList.toggle("active", !!active);
+      row.dataset.engine === state.activeRun.engine &&
+      row.dataset.hash === state.activeRun.config_hash;
+    row.classList.toggle("active", !!active);
   }
 }
 
@@ -470,6 +490,8 @@ function clearResults(message = "Run fast or a full report to see results.") {
   els.provenanceBody.innerHTML = "";
   els.warnings.classList.add("hidden");
   els.warnings.innerHTML = "";
+  if (els.runMetaEditor) els.runMetaEditor.classList.add("hidden");
+  if (els.btnPinBaseline) els.btnPinBaseline.classList.add("hidden");
   state.activeRun = null;
   state.lastRunData = null;
   state.plotSource = null;
@@ -507,7 +529,7 @@ function setPlotSourceBadge(kind) {
   els.plotSourceBadge.classList.remove("hidden");
 }
 
-function renderSummary(summary, provenance) {
+function renderSummary(summary, provenance, deltas = {}) {
   if (els.resultsEmpty) els.resultsEmpty.classList.add("hidden");
   els.kpis.innerHTML = "";
   for (const [key, label, unit, srcKey] of KPI_FIELDS) {
@@ -519,7 +541,7 @@ function renderSummary(summary, provenance) {
     const src = srcKey && summary[srcKey] ? summary[srcKey] : provenance[key.replace("_src", "")] || "";
     card.innerHTML = `
       <div class="kpi-label">${label}</div>
-      <div class="kpi-value">${esc(value)}${unitStr}</div>
+      <div class="kpi-value">${esc(value)}${unitStr}${deltas[key] || ""}</div>
       ${src ? `<div class="kpi-src">${esc(src)}</div>` : ""}
     `;
     els.kpis.appendChild(card);
@@ -627,14 +649,127 @@ function renderArtifacts(engine, configHash, artifacts) {
   }
 }
 
+/* ── Baseline & delta chips ─────────────────────────────────── */
+
+const DELTA_SPECS = {
+  thrust_N: { dec: 1, unit: "N", better: "up" },
+  isp_s: { dec: 1, unit: "s", better: "up" },
+  pc_bar: { dec: 1, unit: "bar", better: "none" },
+  mdot_kg_s: { dec: 3, unit: "kg/s", better: "none" },
+  T_wall_max_K: { dec: 0, unit: "K", better: "down" },
+  dp_regen_bar: { dec: 1, unit: "bar", better: "down" },
+};
+
+/** Baseline entry derived from the cached runs listing, or null. */
+function getBaselineRun() {
+  return state.runsList.find((r) => r.is_baseline) || null;
+}
+
+function baselineName(bl) {
+  return bl.label || `${bl.engine}/${bl.config_hash.slice(0, 8)}`;
+}
+
+function isBaselineRun(data, bl = getBaselineRun()) {
+  return !!(
+    bl &&
+    data?.engine === bl.engine &&
+    data?.config_hash === bl.config_hash
+  );
+}
+
+/** HTML for one delta chip, or "" when either side is missing. */
+function deltaChipHtml(cur, base, spec, blName) {
+  if (cur == null || base == null) return "";
+  const c = Number(cur);
+  const b = Number(base);
+  if (!Number.isFinite(c) || !Number.isFinite(b)) return "";
+  const d = c - b;
+  const zero = Number(d.toFixed(spec.dec)) === 0;
+  let cls = "delta-neutral";
+  if (!zero && spec.better === "up") cls = d > 0 ? "delta-good" : "delta-bad";
+  if (!zero && spec.better === "down") cls = d < 0 ? "delta-good" : "delta-bad";
+  const sign = zero ? "±" : d > 0 ? "+" : "−";
+  const mag = Math.abs(d).toFixed(spec.dec);
+  const unitStr = spec.unit ? ` ${spec.unit}` : "";
+  return `<span class="delta-chip ${cls}" title="vs baseline ${esc(blName)}">${sign}${mag}${unitStr}</span>`;
+}
+
+/** Delta chips for the summary KPI cards (keyed by summary field). */
+function computeSummaryDeltas(summary, bl) {
+  const blName = baselineName(bl);
+  const deltas = {};
+  for (const key of ["thrust_N", "isp_s", "pc_bar", "mdot_kg_s"]) {
+    const chip = deltaChipHtml(summary?.[key], bl[key], DELTA_SPECS[key], blName);
+    if (chip) deltas[key] = chip;
+  }
+  return deltas;
+}
+
+/** Attach T_wall / Δp delta chips to the regen KPI cards StudioP2 rendered. */
+function appendRegenDeltaChips(regen, bl) {
+  if (!regen || !bl) return;
+  const blName = baselineName(bl);
+  const byLabel = {
+    "T_wall max": [regen.T_wall_max_K, bl.T_wall_max_K, DELTA_SPECS.T_wall_max_K],
+    "Δp cool": [regen.dp_bar, bl.dp_regen_bar, DELTA_SPECS.dp_regen_bar],
+  };
+  for (const card of els.kpis.querySelectorAll(".kpi-regen")) {
+    const label = card.querySelector(".kpi-label")?.textContent;
+    const entry = byLabel[label];
+    if (!entry) continue;
+    const chip = deltaChipHtml(entry[0], entry[1], entry[2], blName);
+    if (chip) card.querySelector(".kpi-value")?.insertAdjacentHTML("beforeend", chip);
+  }
+}
+
+/** Render summary KPIs + regen KPIs + baseline deltas for a run payload. */
+function renderKpiArea(data) {
+  const bl = getBaselineRun();
+  const self = isBaselineRun(data, bl);
+  const deltas = bl && !self ? computeSummaryDeltas(data.summary, bl) : {};
+  renderSummary(data.summary, data.provenance, deltas);
+  const extras = extractRunExtras(data);
+  if (window.StudioP2) StudioP2.appendRegenKpis(els.kpis, extras.regen);
+  if (bl && !self) appendRegenDeltaChips(extras.regen, bl);
+  if (self) {
+    const flag = document.createElement("div");
+    flag.className = "kpi-baseline-flag";
+    flag.textContent = "baseline";
+    flag.title = "This run is the pinned baseline";
+    els.kpis.prepend(flag);
+  }
+}
+
+/** Sync the results-header pin button with the run currently displayed. */
+function updatePinButton() {
+  const btn = els.btnPinBaseline;
+  if (!btn) return;
+  const data = state.lastRunData;
+  const saved =
+    data &&
+    data.mode !== "fast" &&
+    data.engine &&
+    data.config_hash &&
+    state.runsList.some(
+      (r) => r.engine === data.engine && r.config_hash === data.config_hash
+    );
+  btn.classList.toggle("hidden", !saved);
+  if (!saved) return;
+  const pinned = isBaselineRun(data);
+  btn.classList.toggle("is-pinned", pinned);
+  btn.textContent = pinned ? "📌 baseline" : "📌 pin";
+  btn.title = pinned
+    ? "This run is the baseline — click to unpin"
+    : "Pin this run as the comparison baseline";
+}
+
 function renderRun(data) {
   state.lastRunData = data;
-  renderSummary(data.summary, data.provenance);
+  renderKpiArea(data);
   renderWarnings(data.warnings);
 
   const extras = extractRunExtras(data);
   if (window.StudioP2) {
-    StudioP2.appendRegenKpis(els.kpis, extras.regen);
     StudioP2.renderRunBadge(els.resultsSourceBadge, {
       mode: data.mode,
       outdir: data.outdir,
@@ -657,6 +792,10 @@ function renderRun(data) {
     renderArtifacts(data.engine, data.config_hash, data.artifacts);
     highlightActiveRun();
     syncCompareSelects();
+    if (els.runMetaEditor) {
+      els.runMetaEditor.classList.remove("hidden");
+      if (els.runNoteInput) els.runNoteInput.value = data.note || "";
+    }
   } else if (data.mode === "fast") {
     state.activePlot = null;
     state.plotSource = "live";
@@ -666,7 +805,9 @@ function renderRun(data) {
     els.plotPlaceholder.textContent = "Fast runs produce no artifacts. Run a full report for plots.";
     setPlotSourceBadge("live");
     els.artifactsList.innerHTML = '<p class="placeholder">No artifacts (fast run).</p>';
+    if (els.runMetaEditor) els.runMetaEditor.classList.add("hidden");
   }
+  updatePinButton();
 }
 
 async function loadRuns() {

@@ -64,6 +64,35 @@ Run with `python -m resa campaign campaigns/e2_c1/e2_regen.yaml`.
 
 **RESA Studio** can also run campaigns from the sidebar; see [STUDIO.md](STUDIO.md).
 
+### Parametric design sweeps
+
+A campaign can also sweep **design inputs** over a base config — the cross
+product of all axes runs through the fast pipeline (no per-point report
+folders):
+
+```yaml
+name: pc_cr_study
+output: pc_cr_study_output
+base: ../../configs/projects/e2_c1/design.yaml
+sweep:
+  operating_point.pc_bar: [20, 25, 30, 35]      # explicit values
+  chamber.contraction_ratio:
+    range: [6, 14]                               # or an even range
+    n: 5
+sweep_regen: true                                # also solve the regen circuit
+                                                 # per point (T_wall_max_K,
+                                                 # dp_regen_bar, Q_total_kW)
+```
+
+- Axis keys are dotted paths into the resolved config; values are set after
+  `base:` inheritance and file refs resolve.
+- Output: `sweep_rollup.csv` (axis columns + the run summary per point) and
+  `sweep_plots.html` (metric lines for 1 axis, heatmaps for 2 axes; needs
+  plotly). Grids are capped at 1000 points.
+- A point that fails (e.g. infeasible geometry) gets an `error` column in its
+  row instead of aborting the study.
+- `configs:` and `sweep:` can coexist in one campaign; sweeps require `base:`.
+
 ### CI / golden tests
 
 Golden regression uses **offline combustion tables** in `configs/shared/cea_tables/`
