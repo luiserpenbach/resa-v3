@@ -1,8 +1,8 @@
 """RESA command line.
 
-    python -m resa run       configs/e2_c1/design.yaml
-    python -m resa report    configs/e2_c1/design.yaml
-    python -m resa campaign  campaigns/e2.yaml
+    python -m resa run       configs/projects/e2_c1/design.yaml
+    python -m resa report    configs/projects/e2_c1/design.yaml
+    python -m resa campaign  campaigns/e2_c1/e2.yaml
     python -m resa diff      out/A_xxx out/B_yyy
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ def _cmd_report(args) -> None:
         rollup.append(res.summary())
 
     if len(rollup) > 1:
-        keys = list({k for row in rollup for k in row})
+        keys = list(dict.fromkeys(k for row in rollup for k in row))
         rollup_path = Path(args.out) / "campaign_rollup.csv"
         with rollup_path.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=keys)

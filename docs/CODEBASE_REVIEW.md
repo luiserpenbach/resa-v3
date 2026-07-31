@@ -1,5 +1,19 @@
 # RESA v3 — Codebase Analysis & Review
 
+> **Status:** the recommended priorities in §7 have been implemented on this
+> branch (see the commit series following this document): E2-1A file refs
+> restored, overlay-save data-loss bugs fixed, contour feasibility guards +
+> `n_stations` honored, regen biases and the energy-closure diagnostic fixed,
+> PDF envelope orientation fixed, frontend canvas/XSS/leak fixes and dead-code
+> removal, strict regen schema, CORS restricted, tests green (90 passed).
+> Items NOT addressed (still open, lower priority): preview-cache
+> timestamp/thundering-herd behavior, campaign-service path confinement,
+> `RESA_*_ROOT` env overrides outside the repo root, save comment
+> destruction / concurrency guard, design-mode uncertainty-band semantics,
+> `cooling.correlation`/`mdot_coolant_kg_s` schema fields (kept for
+> compatibility; still unused), and the remaining §5 low items not listed
+> above.
+
 Deep review of bugs, workflow errors, unused code, and feature effectiveness,
 covering the core physics (`resa/models`, `resa/properties`, `resa/pipeline.py`),
 regen cooling (`resa/regen`, `resa/regen_channels`), config/campaign/reporting

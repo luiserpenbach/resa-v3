@@ -4,7 +4,6 @@ The report writer decides where figures go; these just build them.
 """
 from __future__ import annotations
 
-import numpy as np
 import plotly.graph_objects as go
 
 from ..results import ContourResult

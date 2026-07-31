@@ -1,4 +1,4 @@
-# EX15 — 15 kN-class H2/GOX thrust chamber (ε = 50, vacuum)
+# EX15 — 15 kN-class H2/GOX thrust chamber (vacuum; ε from design.yaml)
 contraction_ratio: 7.0
 l_star_m: 0.9
 contour: "rao_bell"

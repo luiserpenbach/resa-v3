@@ -40,7 +40,3 @@ def pressure_ratio_from_mach(M: float, g: float) -> float:
     """p/pc (static over stagnation)."""
     return (1.0 + 0.5 * (g - 1.0) * M * M) ** (-g / (g - 1.0))
 
-
-def temperature_ratio_from_mach(M: float, g: float) -> float:
-    """T/Tc (static over stagnation)."""
-    return 1.0 / (1.0 + 0.5 * (g - 1.0) * M * M)

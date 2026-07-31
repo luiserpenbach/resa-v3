@@ -46,9 +46,6 @@ class Contour:
                               bounds=(lo, hi), method="bounded")
         return float(res.x), float(res.fun)
 
-    def area(self, x):
-        return np.pi * self.r(x) ** 2
-
 
 # ------------------------------------------------------------ parametric --
 def _bell_bezier(p_start, theta_n, p_end, theta_e, n=120):

@@ -132,7 +132,8 @@ SOLVE_SCALARS = [
     ("outlet T [K]", lambda d: d.attrs["outlet_T_K"]),
     ("outlet p [bar]", lambda d: d.attrs["outlet_p_bar"]),
     ("outlet quality [-]", lambda d: d.quality.iloc[0]
-        if d.attrs.get("inlet_at_nozzle", True) else d.quality.iloc[-1]),
+        if d.attrs.get("coolant_inlet_location", "nozzle_end") == "nozzle_end"
+        else d.quality.iloc[-1]),
     ("max v [m/s]", lambda d: d.v_m_s.max()),
     ("mdot coolant [kg/s]", lambda d: d.attrs["mdot_total"]),
     ("saturation reached", lambda d: d.attrs["saturation_reached"]),

@@ -22,7 +22,8 @@ static frontend from `frontend/public/` and the REST API under `/api/`.
 | `RESA_CONFIGS_ROOT` | `<root>/configs` | Config tree root |
 | `RESA_PROJECTS_ROOT` | `<root>/configs/projects` | Project folders for the sidebar |
 
-Preview requests share an in-process LRU cache (48 entries, 120 s TTL) so
+Preview requests share an in-process cache (48 entries, oldest-entry
+eviction, 120 s TTL) so
 debounced contour/cooling edits do not re-run the full pipeline on every keystroke.
 
 Optional extras:
@@ -60,8 +61,7 @@ resa_studio/         FastAPI app + adapters
 | Design | Operating point, expansion mode (ε / pe / optimum) |
 | Analyze | Fixed geometry + test mass flows; contour preview |
 | Chamber | Contour & sizing with live 2D/3D preview |
-| Cooling | Channel layout, thermal KPIs, STL/STEP export |
-| Regen | Profile editors, sync matrix, thermal sparkline |
+| Cooling | Channel layout, regen profile editors, sync matrix, thermal KPIs, STL/STEP export |
 | Off-design | Structured sweep toggles; charts in Results after run |
 
 Draft edits are auto-saved to localStorage per config path. Undo/redo works
@@ -77,9 +77,9 @@ while editing.
 | GET | `/api/config/resolve` | Load + compose config |
 | POST | `/api/config/validate` | Validate inline dict |
 | GET | `/api/projects/list` | All projects with nested configs |
-| POST | `/api/projects/create` | New project folder + `design.yaml` |
+| POST | `/api/projects/create` | New project folder + `<slug>.yaml` starter config |
 | POST | `/api/projects/{slug}/configs` | New config in a project |
-| POST | `/api/config/save` | Save edits to the file being edited (thin overlay when `base:` is set) |
+| POST | `/api/config/save` | Save edits to the file being edited (diffed against the `base:` config and fragment refs preserved when set) |
 | POST | `/api/runs/fast` | Fast pipeline (no disk write) |
 | POST | `/api/runs/full` | Full report folder |
 | GET | `/api/runs` | List saved runs |
