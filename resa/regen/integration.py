@@ -8,8 +8,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from ..config.schema import ChamberConfig, EngineConfig
-from ..regen_channels.config import RegenConfig
+from ..config.schema import ChamberConfig, EngineConfig, FilmCoolingConfig
+from ..regen_channels.config import FilmCfg, RegenConfig
 from ..regen_channels.contour import Contour, build_contour
 from ..regen_channels.export import export_artifacts
 from ..regen_channels.layout import ChannelLayout
@@ -62,6 +62,7 @@ def prepare_regen_config(
     tc: ThrustChamberResult,
     comb: CombustionResult,
     chamber: ChamberConfig,
+    film: "FilmCoolingConfig | None" = None,
 ) -> RegenConfig:
     """Apply RESA nominal-point values for each sync flag that is enabled."""
     sync = regen.sync
@@ -92,6 +93,12 @@ def prepare_regen_config(
         else:
             mdot = tc.mdot_ox_kg_s
         solver_updates["mdot_total"] = mdot
+    if film is not None:
+        solver_updates["film"] = FilmCfg(
+            injection_x_m=film.injection_x_m,
+            effectiveness_length_m=film.effectiveness_length_m,
+            film_temp_K=film.film_temp_K,
+        )
     solver = regen.solver.model_copy(update=solver_updates)
     return regen.model_copy(update={"solver": solver})
 
@@ -157,5 +164,6 @@ def run_regen_for_engine(
 ) -> RegenResult:
     if cfg.regen is None:
         raise ValueError("engine config has no regen block")
-    regen = prepare_regen_config(cfg.regen, tc, comb, cfg.chamber)
+    regen = prepare_regen_config(
+        cfg.regen, tc, comb, cfg.chamber, film=cfg.film_cooling)
     return run_regen(regen, res_contour, out_dir)

@@ -11,7 +11,7 @@ import numpy as np
 
 from .config.loader import load_config
 from .config.schema import EngineConfig
-from .models import contour, offdesign, thrust_chamber
+from .models import contour, film, offdesign, thrust_chamber
 from .properties import combustion
 from .results import EngineResult, UncertaintyResult
 
@@ -61,12 +61,33 @@ def run(cfg: EngineConfig) -> EngineResult:
     model = combustion.build_model(cfg.propellants, cfg.combustion)
 
     # 2. nominal point: design sizing OR reverse analysis --------------------
+    # With film cooling, the kernel sees the combusting CORE flow (shifted
+    # O/F, film subtracted); delivered totals are book-kept afterwards.
+    film_res = None
+    film_warnings: tuple = ()
+    op, ap = cfg.operating_point, cfg.analyze_point
+    of_overall = None
+    if cfg.film_cooling is not None:
+        if cfg.mode == "design":
+            op, of_overall = film.core_operating_point(op, cfg.film_cooling)
+        else:
+            ap, of_overall = film.core_analyze_point(ap, cfg.film_cooling)
+        film_warnings = (film.MODEL_NOTE,)
+
     if cfg.mode == "design":
-        tc = thrust_chamber.size(cfg.operating_point, model)
-        p_amb = cfg.operating_point.p_amb_bar
+        tc = thrust_chamber.size(op, model)
+        p_amb = op.p_amb_bar
     else:
-        tc = thrust_chamber.analyze(cfg.geometry, cfg.analyze_point, model)
-        p_amb = cfg.analyze_point.p_amb_bar
+        tc = thrust_chamber.analyze(cfg.geometry, ap, model)
+        p_amb = ap.p_amb_bar
+
+    if cfg.film_cooling is not None:
+        mdot_total = None
+        if cfg.mode == "analyze":
+            mdot_total = (cfg.analyze_point.mdot_ox_kg_s
+                          + cfg.analyze_point.mdot_fuel_kg_s)
+        film_res = film.build_result(
+            tc, cfg.film_cooling, of_overall, mdot_total_kg_s=mdot_total)
 
     comb = model.at(tc.of_ratio, pc_bar=tc.pc_bar)
 
@@ -77,20 +98,24 @@ def run(cfg: EngineConfig) -> EngineResult:
     od = None
     if cfg.offdesign is not None:
         od = offdesign.run(cfg.offdesign, tc, model, p_amb)
+        if cfg.film_cooling is not None:
+            film_warnings += (
+                "off-design sweeps do not model film cooling (core flow only)",
+            )
 
     # 5. uncertainty: bounding re-runs at eta_cstar ± tol ----------------------
     unc = None
-    point = cfg.operating_point if cfg.mode == "design" else cfg.analyze_point
+    point = op if cfg.mode == "design" else ap
     tol = point.eta_cstar_tol
     if tol is not None:
         def _at_eta(eta):
             if cfg.mode == "design":
                 return thrust_chamber.size(
-                    cfg.operating_point.model_copy(update={"eta_cstar": eta}),
+                    op.model_copy(update={"eta_cstar": eta}),
                     model)
             return thrust_chamber.analyze(
                 cfg.geometry,
-                cfg.analyze_point.model_copy(update={"eta_cstar": eta}),
+                ap.model_copy(update={"eta_cstar": eta}),
                 model)
         tc_lo, tc_hi = _at_eta(point.eta_cstar - tol), _at_eta(point.eta_cstar + tol)
         od_lo = od_hi = None
@@ -105,8 +130,9 @@ def run(cfg: EngineConfig) -> EngineResult:
     return EngineResult(
         engine=cfg.engine, config_hash=cfg.config_hash, mode=cfg.mode,
         combustion=comb, thrust_chamber=tc, contour=cont, offdesign=od,
-        uncertainty=unc,
-        warnings=_checks(cfg, tc, cont, pc_converged=tc.pc_converged) + (od.notes if od else ()),
+        uncertainty=unc, film=film_res,
+        warnings=_checks(cfg, tc, cont, pc_converged=tc.pc_converged)
+        + (od.notes if od else ()) + film_warnings,
     )
 
 

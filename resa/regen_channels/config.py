@@ -130,6 +130,14 @@ class CoolantInletCfg(BaseModel):
     location: Literal["nozzle_end", "injector_end"] = "nozzle_end"
 
 
+class FilmCfg(BaseModel):
+    """First-order film wall relief: T_aw_eff = eta*T_film + (1-eta)*T_aw
+    with eta(x) = exp(-(x - x_inj)/L) downstream of the injection station."""
+    injection_x_m: Optional[float] = None      # default: channel start (min x)
+    effectiveness_length_m: float = Field(gt=0)
+    film_temp_K: float = Field(default=600.0, gt=0)
+
+
 class SolverCfg(BaseModel):
     enabled: bool = True
     coolant: str = "NitrousOxide"
@@ -145,6 +153,7 @@ class SolverCfg(BaseModel):
     roughness: float = 8.0e-6            # LPBF as-built wall roughness [m]
     curvature_enhancement: bool = True   # helix curvature on HTC & friction
     max_iter_wall: int = 200             # brentq iterations per wall solve
+    film: Optional[FilmCfg] = None       # synced from engine film_cooling
 
 
 class ExportCfg(BaseModel):

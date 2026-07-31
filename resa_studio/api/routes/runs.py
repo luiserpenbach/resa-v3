@@ -54,14 +54,58 @@ class RunListItem(BaseModel):
     config_hash: str
     outdir: str
     mode: str
+    analysis_mode: str | None = None
     thrust_N: float | None
     isp_s: float | None
+    pc_bar: float | None = None
+    of_ratio: float | None = None
+    mdot_kg_s: float | None = None
+    T_wall_max_K: float | None = None
+    dp_regen_bar: float | None = None
+    n_warnings: int = 0
+    label: str | None = None
+    note: str | None = None
+    is_baseline: bool = False
     modified_at: float
 
 
 @router.get("", response_model=list[RunListItem])
 def list_runs() -> list[RunListItem]:
     return [RunListItem(**item) for item in _runs.list_runs()]
+
+
+class RunMetaRequest(BaseModel):
+    label: str | None = None
+    note: str | None = None
+
+
+@router.post("/{engine}/{config_hash}/meta")
+def set_run_meta(engine: str, config_hash: str, body: RunMetaRequest) -> dict[str, Any]:
+    try:
+        meta = _runs.set_run_meta(
+            engine, config_hash, label=body.label, note=body.note
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "engine": engine, "config_hash": config_hash, **meta}
+
+
+class BaselineRequest(BaseModel):
+    engine: str | None = None
+    config_hash: str | None = None
+
+
+@router.get("/baseline")
+def get_baseline() -> dict[str, Any]:
+    return {"baseline": _runs.get_baseline()}
+
+
+@router.post("/baseline")
+def set_baseline(body: BaselineRequest) -> dict[str, Any]:
+    try:
+        return _runs.set_baseline(body.engine, body.config_hash)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/fast", response_model=RunResponse)

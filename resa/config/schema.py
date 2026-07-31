@@ -224,6 +224,27 @@ class CoolingConfig(StrictModel):
 
 
 # --------------------------------------------------------------------------- #
+# Film cooling (first-order model — see resa/models/film.py)
+# --------------------------------------------------------------------------- #
+class FilmCoolingConfig(StrictModel):
+    """Propellant film cooling, first-order.
+
+    ``fraction`` of the TOTAL propellant mass flow is injected as a wall film
+    from ``side``. The film does not combust (core O/F shifts) and produces
+    no thrust (delivered Isp = core Isp × (1 − fraction), conservative).
+    Wall relief enters the regen solve as an adiabatic-wall-temperature
+    reduction with exponential decay of user-set length downstream of the
+    injection station — the decay length is NOT derived from ``fraction``.
+    """
+
+    fraction: float = Field(gt=0.0, lt=0.5)      # of total propellant mdot
+    side: Literal["fuel", "oxidizer"] = "fuel"
+    injection_x_m: Optional[float] = None        # default: injector face
+    effectiveness_length_m: float = Field(default=0.10, gt=0)
+    film_temp_K: float = Field(default=600.0, gt=0)  # effective near-wall gas temp
+
+
+# --------------------------------------------------------------------------- #
 # Top-level engine config
 # --------------------------------------------------------------------------- #
 class EngineConfig(StrictModel):
@@ -238,6 +259,7 @@ class EngineConfig(StrictModel):
     geometry: Optional[GeometryConfig] = None          # required for ANALYZE
     offdesign: Optional[OffDesignConfig] = None
     regen: Optional[RegenConfig] = None          # high-fidelity regen cooling
+    film_cooling: Optional[FilmCoolingConfig] = None
     config_hash: str = ""
 
     @model_validator(mode="after")
@@ -252,6 +274,22 @@ class EngineConfig(StrictModel):
         c = self.cooling
         if c.n_channels * (c.channel_width_m + c.rib_width_m) > 1.0:
             raise ValueError("channel layout exceeds 1 m circumference — check units")
+        if self.film_cooling is not None and self.operating_point is not None:
+            of = self.operating_point.of_ratio
+            if of is None:
+                raise ValueError(
+                    "film_cooling requires an explicit operating_point.of_ratio "
+                    "(max-Isp O/F search is not film-aware)"
+                )
+            f = self.film_cooling.fraction
+            side_frac = (1.0 / (1.0 + of) if self.film_cooling.side == "fuel"
+                         else of / (1.0 + of))
+            if f >= side_frac:
+                raise ValueError(
+                    f"film_cooling.fraction={f:g} exceeds the "
+                    f"{self.film_cooling.side} fraction of total flow "
+                    f"({side_frac:.3f}) at O/F={of:g}"
+                )
         return self
 
     @property

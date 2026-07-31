@@ -103,12 +103,20 @@
       <section class="card results-card">
         <div class="card-header card-header-actions">
           <h2>Results</h2>
-          <div id="results-source-badge" class="results-source-badge hidden"></div>
+          <div class="card-header-right">
+            <button id="btn-pin-baseline" type="button" class="btn-pin-baseline hidden" title="Pin this run as the comparison baseline">📌 pin</button>
+            <div id="results-source-badge" class="results-source-badge hidden"></div>
+          </div>
         </div>
         <div class="card-body">
           <p id="results-empty" class="results-empty">Run fast or a full report to see results.</p>
           <div id="warnings" class="warnings hidden"></div>
           <div id="kpis" class="kpis"></div>
+          <div id="run-meta-editor" class="run-meta-editor hidden">
+            <label class="run-meta-label" for="run-note-input">Note</label>
+            <textarea id="run-note-input" rows="2" placeholder="Add a note for this run…"></textarea>
+            <button id="btn-save-note" type="button" class="btn-inline btn-save-note">Save note</button>
+          </div>
           <div id="offdesign-sweeps" class="offdesign-sweeps hidden"></div>
           <details id="compare-results" class="compare-results hidden">
             <summary>Run comparison</summary>

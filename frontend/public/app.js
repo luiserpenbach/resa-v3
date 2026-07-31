@@ -41,7 +41,8 @@ const state = {
   editSession: null,
   loadSeq: 0,
   lastRunData: null,
-  savedRuns: [],
+  runsList: [],
+  runSort: { key: "modified_at", dir: "desc" },
   compareA: null,
   compareB: null,
   plotSource: null,
@@ -93,6 +94,10 @@ const els = {
   btnRunFast: document.getElementById("btn-run-fast"),
   btnRunFull: document.getElementById("btn-run-full"),
   btnRefreshRuns: document.getElementById("btn-refresh-runs"),
+  btnPinBaseline: document.getElementById("btn-pin-baseline"),
+  runMetaEditor: document.getElementById("run-meta-editor"),
+  runNoteInput: document.getElementById("run-note-input"),
+  btnSaveNote: document.getElementById("btn-save-note"),
 };
 
 /** Escape a dynamic value before interpolating it into innerHTML. */
@@ -224,6 +229,21 @@ function formatRunTime(ts) {
   return new Date(ts * 1000).toLocaleString(undefined, {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+}
+
+/** Compact relative age, e.g. "5m", "3h", "2d"; falls back to a short date. */
+function formatAge(ts) {
+  const sec = Math.max(0, Date.now() / 1000 - ts);
+  if (sec < 60) return "now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+  if (sec < 7 * 86400) return `${Math.floor(sec / 86400)}d`;
+  return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Fixed-decimal number, em-dash for null/non-finite. */
+function fmtNum(v, dec) {
+  return v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(dec);
 }
 
 function projectSlugFromPath(path) {
@@ -440,12 +460,12 @@ function highlightConfigNav() {
 }
 
 function highlightActiveRun() {
-  for (const btn of els.runsList.querySelectorAll(".nav-item-run")) {
+  for (const row of els.runsList.querySelectorAll(".run-row")) {
     const active =
       state.activeRun &&
-      btn.dataset.engine === state.activeRun.engine &&
-      btn.dataset.hash === state.activeRun.config_hash;
-    btn.classList.toggle("active", !!active);
+      row.dataset.engine === state.activeRun.engine &&
+      row.dataset.hash === state.activeRun.config_hash;
+    row.classList.toggle("active", !!active);
   }
 }
 
@@ -470,6 +490,8 @@ function clearResults(message = "Run fast or a full report to see results.") {
   els.provenanceBody.innerHTML = "";
   els.warnings.classList.add("hidden");
   els.warnings.innerHTML = "";
+  if (els.runMetaEditor) els.runMetaEditor.classList.add("hidden");
+  if (els.btnPinBaseline) els.btnPinBaseline.classList.add("hidden");
   state.activeRun = null;
   state.lastRunData = null;
   state.plotSource = null;
@@ -507,7 +529,7 @@ function setPlotSourceBadge(kind) {
   els.plotSourceBadge.classList.remove("hidden");
 }
 
-function renderSummary(summary, provenance) {
+function renderSummary(summary, provenance, deltas = {}) {
   if (els.resultsEmpty) els.resultsEmpty.classList.add("hidden");
   els.kpis.innerHTML = "";
   for (const [key, label, unit, srcKey] of KPI_FIELDS) {
@@ -519,7 +541,7 @@ function renderSummary(summary, provenance) {
     const src = srcKey && summary[srcKey] ? summary[srcKey] : provenance[key.replace("_src", "")] || "";
     card.innerHTML = `
       <div class="kpi-label">${label}</div>
-      <div class="kpi-value">${esc(value)}${unitStr}</div>
+      <div class="kpi-value">${esc(value)}${unitStr}${deltas[key] || ""}</div>
       ${src ? `<div class="kpi-src">${esc(src)}</div>` : ""}
     `;
     els.kpis.appendChild(card);
@@ -627,14 +649,127 @@ function renderArtifacts(engine, configHash, artifacts) {
   }
 }
 
+/* ── Baseline & delta chips ─────────────────────────────────── */
+
+const DELTA_SPECS = {
+  thrust_N: { dec: 1, unit: "N", better: "up" },
+  isp_s: { dec: 1, unit: "s", better: "up" },
+  pc_bar: { dec: 1, unit: "bar", better: "none" },
+  mdot_kg_s: { dec: 3, unit: "kg/s", better: "none" },
+  T_wall_max_K: { dec: 0, unit: "K", better: "down" },
+  dp_regen_bar: { dec: 1, unit: "bar", better: "down" },
+};
+
+/** Baseline entry derived from the cached runs listing, or null. */
+function getBaselineRun() {
+  return state.runsList.find((r) => r.is_baseline) || null;
+}
+
+function baselineName(bl) {
+  return bl.label || `${bl.engine}/${bl.config_hash.slice(0, 8)}`;
+}
+
+function isBaselineRun(data, bl = getBaselineRun()) {
+  return !!(
+    bl &&
+    data?.engine === bl.engine &&
+    data?.config_hash === bl.config_hash
+  );
+}
+
+/** HTML for one delta chip, or "" when either side is missing. */
+function deltaChipHtml(cur, base, spec, blName) {
+  if (cur == null || base == null) return "";
+  const c = Number(cur);
+  const b = Number(base);
+  if (!Number.isFinite(c) || !Number.isFinite(b)) return "";
+  const d = c - b;
+  const zero = Number(d.toFixed(spec.dec)) === 0;
+  let cls = "delta-neutral";
+  if (!zero && spec.better === "up") cls = d > 0 ? "delta-good" : "delta-bad";
+  if (!zero && spec.better === "down") cls = d < 0 ? "delta-good" : "delta-bad";
+  const sign = zero ? "±" : d > 0 ? "+" : "−";
+  const mag = Math.abs(d).toFixed(spec.dec);
+  const unitStr = spec.unit ? ` ${spec.unit}` : "";
+  return `<span class="delta-chip ${cls}" title="vs baseline ${esc(blName)}">${sign}${mag}${unitStr}</span>`;
+}
+
+/** Delta chips for the summary KPI cards (keyed by summary field). */
+function computeSummaryDeltas(summary, bl) {
+  const blName = baselineName(bl);
+  const deltas = {};
+  for (const key of ["thrust_N", "isp_s", "pc_bar", "mdot_kg_s"]) {
+    const chip = deltaChipHtml(summary?.[key], bl[key], DELTA_SPECS[key], blName);
+    if (chip) deltas[key] = chip;
+  }
+  return deltas;
+}
+
+/** Attach T_wall / Δp delta chips to the regen KPI cards StudioP2 rendered. */
+function appendRegenDeltaChips(regen, bl) {
+  if (!regen || !bl) return;
+  const blName = baselineName(bl);
+  const byLabel = {
+    "T_wall max": [regen.T_wall_max_K, bl.T_wall_max_K, DELTA_SPECS.T_wall_max_K],
+    "Δp cool": [regen.dp_bar, bl.dp_regen_bar, DELTA_SPECS.dp_regen_bar],
+  };
+  for (const card of els.kpis.querySelectorAll(".kpi-regen")) {
+    const label = card.querySelector(".kpi-label")?.textContent;
+    const entry = byLabel[label];
+    if (!entry) continue;
+    const chip = deltaChipHtml(entry[0], entry[1], entry[2], blName);
+    if (chip) card.querySelector(".kpi-value")?.insertAdjacentHTML("beforeend", chip);
+  }
+}
+
+/** Render summary KPIs + regen KPIs + baseline deltas for a run payload. */
+function renderKpiArea(data) {
+  const bl = getBaselineRun();
+  const self = isBaselineRun(data, bl);
+  const deltas = bl && !self ? computeSummaryDeltas(data.summary, bl) : {};
+  renderSummary(data.summary, data.provenance, deltas);
+  const extras = extractRunExtras(data);
+  if (window.StudioP2) StudioP2.appendRegenKpis(els.kpis, extras.regen);
+  if (bl && !self) appendRegenDeltaChips(extras.regen, bl);
+  if (self) {
+    const flag = document.createElement("div");
+    flag.className = "kpi-baseline-flag";
+    flag.textContent = "baseline";
+    flag.title = "This run is the pinned baseline";
+    els.kpis.prepend(flag);
+  }
+}
+
+/** Sync the results-header pin button with the run currently displayed. */
+function updatePinButton() {
+  const btn = els.btnPinBaseline;
+  if (!btn) return;
+  const data = state.lastRunData;
+  const saved =
+    data &&
+    data.mode !== "fast" &&
+    data.engine &&
+    data.config_hash &&
+    state.runsList.some(
+      (r) => r.engine === data.engine && r.config_hash === data.config_hash
+    );
+  btn.classList.toggle("hidden", !saved);
+  if (!saved) return;
+  const pinned = isBaselineRun(data);
+  btn.classList.toggle("is-pinned", pinned);
+  btn.textContent = pinned ? "📌 baseline" : "📌 pin";
+  btn.title = pinned
+    ? "This run is the baseline — click to unpin"
+    : "Pin this run as the comparison baseline";
+}
+
 function renderRun(data) {
   state.lastRunData = data;
-  renderSummary(data.summary, data.provenance);
+  renderKpiArea(data);
   renderWarnings(data.warnings);
 
   const extras = extractRunExtras(data);
   if (window.StudioP2) {
-    StudioP2.appendRegenKpis(els.kpis, extras.regen);
     StudioP2.renderRunBadge(els.resultsSourceBadge, {
       mode: data.mode,
       outdir: data.outdir,
@@ -657,6 +792,10 @@ function renderRun(data) {
     renderArtifacts(data.engine, data.config_hash, data.artifacts);
     highlightActiveRun();
     syncCompareSelects();
+    if (els.runMetaEditor) {
+      els.runMetaEditor.classList.remove("hidden");
+      if (els.runNoteInput) els.runNoteInput.value = data.note || "";
+    }
   } else if (data.mode === "fast") {
     state.activePlot = null;
     state.plotSource = "live";
@@ -666,65 +805,289 @@ function renderRun(data) {
     els.plotPlaceholder.textContent = "Fast runs produce no artifacts. Run a full report for plots.";
     setPlotSourceBadge("live");
     els.artifactsList.innerHTML = '<p class="placeholder">No artifacts (fast run).</p>';
+    if (els.runMetaEditor) els.runMetaEditor.classList.add("hidden");
   }
+  updatePinButton();
+}
+
+/* ── Runs KPI table ─────────────────────────────────────────── */
+
+// Priority columns (visible without horizontal scroll in a narrow sidebar)
+// come first: Run, Thrust, Isp, T_wall,max. Pc / Δp / warnings / age sit
+// behind the panel-local horizontal scroll.
+const RUN_COLUMNS = [
+  { key: "name", label: "Run", title: "Label / engine · config hash", numeric: false },
+  { key: "thrust_N", label: "F", title: "Thrust [N]", numeric: true, dec: 1 },
+  { key: "isp_s", label: "Isp", title: "Isp [s]", numeric: true, dec: 1 },
+  { key: "T_wall_max_K", label: "Tw", title: "T_wall,max [K]", numeric: true, dec: 0 },
+  { key: "pc_bar", label: "Pc", title: "Pc [bar]", numeric: true, dec: 1 },
+  { key: "dp_regen_bar", label: "Δp", title: "Δp_regen [bar]", numeric: true, dec: 1 },
+  { key: "n_warnings", label: "⚠", title: "Warnings", numeric: true, dec: 0 },
+  { key: "modified_at", label: "Age", title: "Last modified", numeric: true },
+];
+
+function sortRuns(runs) {
+  const { key, dir } = state.runSort;
+  const mul = dir === "asc" ? 1 : -1;
+  const val = (r) =>
+    key === "name" ? (r.label || r.engine || "").toLowerCase() : r[key];
+  return [...runs].sort((a, b) => {
+    const va = val(a);
+    const vb = val(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1; // nulls last regardless of direction
+    if (vb == null) return -1;
+    if (typeof va === "string") return mul * va.localeCompare(vb);
+    return mul * (va - vb);
+  });
+}
+
+function setRunSort(key) {
+  if (state.runSort.key === key) {
+    state.runSort.dir = state.runSort.dir === "asc" ? "desc" : "asc";
+  } else {
+    state.runSort = { key, dir: key === "name" ? "asc" : "desc" };
+  }
+  renderRunsTable();
+}
+
+function buildRunRow(run) {
+  const tr = document.createElement("tr");
+  tr.className = "run-row" + (run.is_baseline ? " is-baseline" : "");
+  tr.dataset.engine = run.engine;
+  tr.dataset.hash = run.config_hash;
+  if (run.note) tr.title = run.note;
+
+  const key = runKey(run.engine, run.config_hash);
+  const pick = state.compareA === key ? "[A]" : state.compareB === key ? "[B]" : "";
+
+  const nameTd = document.createElement("td");
+  nameTd.className = "run-name-cell";
+  nameTd.innerHTML = `
+    <div class="run-name-top">
+      <span class="run-label${run.label ? " has-label" : ""}">${esc(run.label || run.engine)}</span>
+      <span class="run-pick">${pick}</span>
+      ${run.is_baseline ? '<span class="baseline-badge">baseline</span>' : ""}
+    </div>
+    <div class="run-sub">${esc(run.engine)} · ${esc(run.config_hash.slice(0, 8))}</div>
+  `;
+
+  const top = nameTd.querySelector(".run-name-top");
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "btn-row-act";
+  editBtn.textContent = "✎";
+  editBtn.title = "Edit label";
+  editBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    startLabelEdit(run, tr);
+  });
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "btn-row-act btn-row-pin" + (run.is_baseline ? " is-pinned" : "");
+  pinBtn.textContent = "📌";
+  pinBtn.title = run.is_baseline ? "Unpin baseline" : "Pin as baseline";
+  pinBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleBaseline(run.engine, run.config_hash)
+      .catch((err) => console.error("Baseline toggle failed:", err));
+  });
+  top.appendChild(editBtn);
+  top.appendChild(pinBtn);
+  tr.appendChild(nameTd);
+
+  for (const col of RUN_COLUMNS.slice(1)) {
+    const td = document.createElement("td");
+    td.className = "num";
+    if (col.key === "modified_at") {
+      td.textContent = formatAge(run.modified_at);
+      td.title = formatRunTime(run.modified_at);
+    } else if (col.key === "n_warnings") {
+      const n = run.n_warnings || 0;
+      td.textContent = String(n);
+      if (n > 0) td.classList.add("run-warn-some");
+    } else {
+      td.textContent = fmtNum(run[col.key], col.dec);
+    }
+    tr.appendChild(td);
+  }
+
+  tr.addEventListener("click", (e) => {
+    if (e.shiftKey) {
+      pickCompareRun(run.engine, run.config_hash);
+      return;
+    }
+    openRun(run.engine, run.config_hash);
+  });
+  return tr;
+}
+
+function renderRunsTable() {
+  if (!state.runsList.length) {
+    els.runsList.innerHTML = '<p class="placeholder">No saved runs yet.</p>';
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "runs-table-wrap";
+  const table = document.createElement("table");
+  table.className = "runs-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const col of RUN_COLUMNS) {
+    const th = document.createElement("th");
+    th.title = col.title;
+    if (col.numeric) th.className = "num";
+    const active = state.runSort.key === col.key;
+    const ind = active ? (state.runSort.dir === "asc" ? "▲" : "▼") : "";
+    th.innerHTML = `${esc(col.label)}${ind ? `<span class="sort-ind">${ind}</span>` : ""}`;
+    th.addEventListener("click", () => setRunSort(col.key));
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const run of sortRuns(state.runsList)) {
+    tbody.appendChild(buildRunRow(run));
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  els.runsList.innerHTML = "";
+  els.runsList.appendChild(wrap);
+  highlightActiveRun();
 }
 
 async function loadRuns() {
-  els.runsList.innerHTML = '<p class="placeholder">Loading…</p>';
+  if (!state.runsList.length) {
+    els.runsList.innerHTML = '<p class="placeholder">Loading…</p>';
+  }
   try {
     const runs = await api("/api/runs");
-    state.savedRuns = runs;
-    if (runs.length === 0) {
-      els.runsList.innerHTML = '<p class="placeholder">No saved runs yet.</p>';
-      syncCompareSelects();
-      return;
-    }
-
-    els.runsList.innerHTML = "";
-    for (const run of runs) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "nav-item nav-item-run";
-      btn.dataset.engine = run.engine;
-      btn.dataset.hash = run.config_hash;
-      const kpis =
-        run.thrust_N != null && run.isp_s != null
-          ? `${run.thrust_N.toFixed(0)} N · ${run.isp_s.toFixed(1)} s`
-          : "";
-      const key = `${run.engine}|${run.config_hash}`;
-      const pick =
-        state.compareA === key ? " [A]" : state.compareB === key ? " [B]" : "";
-      btn.innerHTML = `
-        <div class="run-title">${esc(run.engine)}${pick}</div>
-        <div class="run-meta">${kpis}${kpis ? " · " : ""}${formatRunTime(run.modified_at)}</div>
-      `;
-      btn.addEventListener("click", (e) => {
-        if (e.shiftKey) {
-          pickCompareRun(run.engine, run.config_hash);
-          return;
-        }
-        openRun(run.engine, run.config_hash);
-      });
-      els.runsList.appendChild(btn);
-    }
-    highlightActiveRun();
+    state.runsList = runs;
+    renderRunsTable();
     syncCompareSelects();
+    updatePinButton();
   } catch (err) {
     els.runsList.innerHTML = `<p class="placeholder" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
+}
+
+/** Swap the label into an inline input; Enter/blur saves, Escape cancels. */
+function startLabelEdit(run, tr) {
+  const top = tr.querySelector(".run-name-top");
+  if (!top || top.querySelector(".run-label-input")) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "run-label-input";
+  input.value = run.label || "";
+  input.maxLength = 200;
+  input.placeholder = run.engine;
+  top.replaceChildren(input);
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const val = input.value.trim();
+    if (!save || val === (run.label || "")) {
+      renderRunsTable();
+      return;
+    }
+    // Empty string clears the label server-side.
+    saveRunMeta(run.engine, run.config_hash, { label: val })
+      .catch((err) => console.error("Label save failed:", err));
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.focus();
+  input.select();
+}
+
+/** POST label/note, patch local state, then refetch the listing. */
+async function saveRunMeta(engine, configHash, patch) {
+  try {
+    await api(`/api/runs/${engine}/${configHash}/meta`, {
+      method: "POST",
+      body: JSON.stringify(patch),
+    });
+    const run = state.runsList.find(
+      (r) => r.engine === engine && r.config_hash === configHash
+    );
+    if (run) {
+      if ("label" in patch) run.label = patch.label || null;
+      if ("note" in patch) run.note = patch.note || null;
+    }
+    renderRunsTable();
+    if (
+      state.lastRunData &&
+      state.lastRunData.engine === engine &&
+      state.lastRunData.config_hash === configHash &&
+      "note" in patch
+    ) {
+      state.lastRunData.note = patch.note || null;
+    }
+    setStatus(`Saved metadata for ${engine}_${configHash}`);
+    await loadRuns();
+  } catch (err) {
+    setStatus(String(err.message), true);
+    renderRunsTable();
+  }
+}
+
+/** Pin a run as baseline, or unpin when it already is the baseline. */
+async function toggleBaseline(engine, configHash) {
+  const bl = getBaselineRun();
+  const isCurrent =
+    !!bl && bl.engine === engine && bl.config_hash === configHash;
+  try {
+    await api("/api/runs/baseline", {
+      method: "POST",
+      body: JSON.stringify(isCurrent ? {} : { engine, config_hash: configHash }),
+    });
+    for (const r of state.runsList) {
+      r.is_baseline =
+        !isCurrent && r.engine === engine && r.config_hash === configHash;
+    }
+    renderRunsTable();
+    refreshBaselineDependentUI();
+    setStatus(
+      isCurrent
+        ? "Baseline unpinned"
+        : `Baseline pinned: ${engine}_${configHash}`
+    );
+    await loadRuns();
+    refreshBaselineDependentUI();
+  } catch (err) {
+    setStatus(String(err.message), true);
+  }
+}
+
+/** Re-render the KPI/delta area and pin button after a baseline change. */
+function refreshBaselineDependentUI() {
+  if (state.lastRunData) renderKpiArea(state.lastRunData);
+  updatePinButton();
 }
 
 function runKey(engine, hash) {
   return `${engine}|${hash}`;
 }
 
-/** Cheaply refresh the [A]/[B] compare tags on already-rendered run buttons. */
+/** Cheaply refresh the [A]/[B] compare tags on already-rendered run rows. */
 function refreshCompareTags() {
-  for (const btn of els.runsList.querySelectorAll(".nav-item-run")) {
-    const key = runKey(btn.dataset.engine, btn.dataset.hash);
-    const pick = state.compareA === key ? " [A]" : state.compareB === key ? " [B]" : "";
-    const title = btn.querySelector(".run-title");
-    if (title) title.textContent = `${btn.dataset.engine}${pick}`;
+  for (const row of els.runsList.querySelectorAll(".run-row")) {
+    const key = runKey(row.dataset.engine, row.dataset.hash);
+    const pick = state.compareA === key ? "[A]" : state.compareB === key ? "[B]" : "";
+    const tag = row.querySelector(".run-pick");
+    if (tag) tag.textContent = pick;
   }
 }
 
@@ -749,7 +1112,7 @@ function pickCompareRun(engine, hash) {
 
 function syncCompareSelects() {
   if (!els.compareRunA || !els.compareRunB) return;
-  const opts = state.savedRuns.map((r) => ({
+  const opts = state.runsList.map((r) => ({
     value: runKey(r.engine, r.config_hash),
     label: `${r.engine}_${r.config_hash}`,
   }));
@@ -1271,6 +1634,19 @@ for (const dlg of [els.dialogNewProject, els.dialogNewConfig]) {
 els.btnCompareRuns?.addEventListener("click", compareSelectedRuns);
 els.compareRunA?.addEventListener("change", () => { state.compareA = els.compareRunA.value || null; });
 els.compareRunB?.addEventListener("change", () => { state.compareB = els.compareRunB.value || null; });
+els.btnPinBaseline?.addEventListener("click", () => {
+  const data = state.lastRunData;
+  if (!data?.engine || !data?.config_hash) return;
+  toggleBaseline(data.engine, data.config_hash)
+    .catch((err) => console.error("Baseline toggle failed:", err));
+});
+els.btnSaveNote?.addEventListener("click", () => {
+  const data = state.lastRunData;
+  if (!data?.engine || !data?.config_hash) return;
+  const note = els.runNoteInput ? els.runNoteInput.value.trim() : "";
+  saveRunMeta(data.engine, data.config_hash, { note })
+    .catch((err) => console.error("Note save failed:", err));
+});
 els.btnEdit?.addEventListener("click", enterEditMode);
 els.btnSave?.addEventListener("click", saveEdit);
 els.btnCancel?.addEventListener("click", cancelEdit);

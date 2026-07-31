@@ -145,6 +145,30 @@ class UncertaintyResult:
 
 
 @dataclass(frozen=True)
+class FilmCoolingResult:
+    """First-order film cooling bookkeeping (see resa/models/film.py)."""
+    fraction: float
+    side: str
+    of_overall: float
+    of_core: float
+    mdot_film_kg_s: float
+    mdot_total_kg_s: float          # tank-side total incl. film
+    isp_core_s: float
+    isp_delivered_s: float          # thrust / (total mdot * g0)
+
+    def summary(self) -> dict:
+        return {
+            "fraction": self.fraction,
+            "side": self.side,
+            "of_overall": self.of_overall,
+            "of_core": self.of_core,
+            "mdot_film_kg_s": self.mdot_film_kg_s,
+            "mdot_total_kg_s": self.mdot_total_kg_s,
+            "isp_delivered_s": self.isp_delivered_s,
+        }
+
+
+@dataclass(frozen=True)
 class EngineResult:
     engine: str
     config_hash: str
@@ -155,6 +179,7 @@ class EngineResult:
     offdesign: Optional[OffDesignResult] = None
     uncertainty: Optional[UncertaintyResult] = None
     regen: Optional["RegenResult"] = None
+    film: Optional[FilmCoolingResult] = None
     warnings: tuple = ()
 
     def summary(self) -> dict:
@@ -188,6 +213,8 @@ class EngineResult:
             d["isp_hi"] = round(u.tc_hi.isp_s, 2)
             d["pc_lo"] = round(u.tc_lo.pc_bar, 3)
             d["pc_hi"] = round(u.tc_hi.pc_bar, 3)
+        if self.film is not None:
+            d.update({f"film_{k}": v for k, v in self.film.summary().items()})
         if self.regen is not None:
             d.update({f"regen_{k}": v for k, v in self.regen.summary().items()})
         return d

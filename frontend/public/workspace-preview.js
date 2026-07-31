@@ -79,6 +79,8 @@
       accent: get("--accent", "#4a9eff"),
       border: get("--border", "#2a2d34"),
       warning: get("--warning", "#f0a030"),
+      danger: get("--danger", "#e85d5d"),
+      success: get("--success", "#3fb950"),
       textMuted: get("--text-muted", "#8b949e"),
       plotBg: get("--plot-bg", "#0f1014"),
       bg: get("--bg", "#0f1014"),
@@ -729,6 +731,234 @@
     }
   }
 
+  /**
+   * Regen thermal margin plot — hot-wall temperature vs axial position with
+   * the wall limit as a dashed line and green/red shading for the margin band.
+   * Follows the same ResizeObserver + destroy() lifecycle as the other
+   * canvases; all colors resolved through canvasColors() (never raw var()).
+   */
+  class MarginPlotCanvas {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d");
+      this.data = null;
+      this._resizeObs = new ResizeObserver(() => this.draw());
+      this._resizeObs.observe(canvas.parentElement || canvas);
+    }
+
+    destroy() {
+      this._resizeObs?.disconnect();
+    }
+
+    setData(data) {
+      this.data = data;
+      this.draw();
+    }
+
+    draw() {
+      const ctx = this.ctx;
+      if (!ctx) return;
+      const canvas = this.canvas;
+      const colors = canvasColors();
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.parentElement?.clientWidth || 320;
+      const h = 210;
+      if (w < 40) return;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = colors.plotBg;
+      ctx.fillRect(0, 0, w, h);
+
+      const prof = this.data?.profiles;
+      const limit = this.data?.wall_limit_K ?? this.data?.summary?.wall_limit_K;
+      const xs = prof?.x_m;
+      const tw = prof?.T_wall_hot_K;
+      if (!xs?.length || !tw?.length || limit == null) {
+        ctx.fillStyle = colors.textMuted;
+        ctx.font = "11px system-ui,sans-serif";
+        ctx.fillText(
+          this.data?.error ? "Thermal solve failed" : "Thermal margin — run thermal preview",
+          10, 22
+        );
+        return;
+      }
+
+      const tc = prof.T_cool_K;
+      const quality = prof.quality;
+      const xsMm = xs.map((x) => x * 1000);
+      const padL = 44, padR = 10, padT = 14, padB = 26;
+      const pw = w - padL - padR;
+      const ph = h - padT - padB;
+      const xMin = Math.min(...xsMm);
+      const xMax = Math.max(...xsMm);
+      let yMin = Math.min(...tw, limit);
+      let yMax = Math.max(...tw, limit);
+      if (tc?.length) yMin = Math.min(yMin, ...tc);
+      const yPad = Math.max((yMax - yMin) * 0.08, 5);
+      yMin -= yPad;
+      yMax += yPad;
+      const toX = (xm) => padL + ((xm - xMin) / (xMax - xMin || 1)) * pw;
+      const toY = (t) => padT + ph * (1 - (t - yMin) / (yMax - yMin || 1));
+
+      // Grid + tick labels
+      ctx.font = "9px system-ui,sans-serif";
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(120, 128, 140, 0.18)";
+      ctx.fillStyle = colors.textMuted;
+      const xStep = niceAxisStep(xMax - xMin, 6);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (let x = Math.ceil(xMin / xStep) * xStep; x <= xMax + xStep * 1e-3; x += xStep) {
+        const px = toX(x);
+        ctx.beginPath();
+        ctx.moveTo(px, padT);
+        ctx.lineTo(px, padT + ph);
+        ctx.stroke();
+        ctx.fillText(x.toFixed(xStep < 1 ? 1 : 0), px, padT + ph + 4);
+      }
+      const yStep = niceAxisStep(yMax - yMin, 5);
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let t = Math.ceil(yMin / yStep) * yStep; t <= yMax + yStep * 1e-3; t += yStep) {
+        const py = toY(t);
+        ctx.beginPath();
+        ctx.moveTo(padL, py);
+        ctx.lineTo(padL + pw, py);
+        ctx.stroke();
+        ctx.fillText(t.toFixed(0), padL - 4, py);
+      }
+
+      // Two-phase coolant underlay (0 < quality < 1)
+      if (quality?.length === xs.length) {
+        const bands = [];
+        let start = null;
+        for (let i = 0; i < quality.length; i++) {
+          const twoPhase = quality[i] > 0 && quality[i] < 1;
+          if (twoPhase && start == null) start = i;
+          if (start != null && (!twoPhase || i === quality.length - 1)) {
+            bands.push([start, twoPhase ? i : i - 1]);
+            start = null;
+          }
+        }
+        for (const [i0, i1] of bands) {
+          const x0 = toX(xsMm[i0]);
+          const x1 = toX(xsMm[i1]);
+          ctx.save();
+          ctx.globalAlpha = 0.1;
+          ctx.fillStyle = colors.warning;
+          ctx.fillRect(x0, padT, Math.max(x1 - x0, 2), ph);
+          ctx.restore();
+          if (x1 - x0 > 48) {
+            ctx.fillStyle = colors.textMuted;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+            ctx.fillText("two-phase", (x0 + x1) / 2, padT + 2);
+          }
+        }
+      }
+
+      // Margin band: shade between wall curve and limit line — green where
+      // margin > 0, red where the curve exceeds the limit.
+      const yLim = toY(limit);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(toX(xsMm[0]), yLim);
+      for (let i = 0; i < xsMm.length; i++) ctx.lineTo(toX(xsMm[i]), toY(tw[i]));
+      ctx.lineTo(toX(xsMm[xsMm.length - 1]), yLim);
+      ctx.closePath();
+      ctx.clip();
+      ctx.globalAlpha = 0.14;
+      ctx.fillStyle = colors.success;
+      ctx.fillRect(padL, yLim, pw, Math.max(padT + ph - yLim, 0));
+      ctx.fillStyle = colors.danger;
+      ctx.fillRect(padL, padT, pw, Math.max(yLim - padT, 0));
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
+      // Wall limit — horizontal dashed line + value label
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = colors.textMuted;
+      ctx.beginPath();
+      ctx.moveTo(padL, yLim);
+      ctx.lineTo(padL + pw, yLim);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = colors.textMuted;
+      ctx.font = "10px system-ui,sans-serif";
+      ctx.textAlign = "right";
+      const limitBelow = yLim - padT < 12;
+      ctx.textBaseline = limitBelow ? "top" : "bottom";
+      ctx.fillText(`wall limit ${Math.round(limit)} K`, padL + pw - 4, yLim + (limitBelow ? 3 : -3));
+
+      // Coolant bulk temperature — thin muted context line
+      if (tc?.length === xs.length) {
+        ctx.strokeStyle = colors.textMuted;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < xsMm.length; i++) {
+          const px = toX(xsMm[i]);
+          const py = toY(tc[i]);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.font = "9px system-ui,sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText("T_cool", toX(xsMm[0]) + 3, toY(tc[0]) - 3);
+      }
+
+      // Hot wall temperature curve
+      ctx.strokeStyle = colors.danger;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < xsMm.length; i++) {
+        const px = toX(xsMm[i]);
+        const py = toY(tw[i]);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      // Minimum-margin marker
+      const s = this.data.summary || {};
+      if (s.x_at_T_wall_max_m != null && s.min_margin_K != null) {
+        const px = toX(s.x_at_T_wall_max_m * 1000);
+        const py = toY(s.T_wall_max_K ?? Math.max(...tw));
+        ctx.fillStyle = s.min_margin_K < 0 ? colors.danger : colors.accent;
+        ctx.beginPath();
+        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        const label =
+          `min margin ${Math.round(s.min_margin_K)} K @ x=${(s.x_at_T_wall_max_m * 1000).toFixed(0)} mm`;
+        ctx.font = "10px system-ui,sans-serif";
+        const onLeft = px > padL + pw / 2;
+        ctx.textAlign = onLeft ? "right" : "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(label, px + (onLeft ? -7 : 7), Math.max(py - 5, padT + 11));
+      }
+
+      // Frame + axis captions
+      ctx.strokeStyle = colors.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(padL, padT, pw, ph);
+      ctx.fillStyle = colors.textMuted;
+      ctx.font = "9px system-ui,sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText("x (mm)", padL + pw / 2, h - 4);
+      ctx.save();
+      ctx.translate(10, padT + ph / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText("T_wall,hot (K)", 0, 0);
+      ctx.restore();
+      ctx.textAlign = "left";
+    }
+  }
+
   /** Channel mesh 3D — Canvas 2D painter's algorithm (reliable across browsers). */
   class ChannelMesh3D {
     constructor(canvas) {
@@ -896,6 +1126,9 @@
       this._seq = { contour: 0, cooling: 0, cooling3d: 0, thermal: 0 };
       this._mesh3dCache = null;
       this.thermalData = null;
+      // Thermal preview fidelity — "preview" (reduced stations) or "full".
+      // Session-scoped: lives on the workspace state object, no localStorage.
+      this.thermalFidelity = "preview";
       this._exportChannelId = 0;
     }
 
@@ -1033,39 +1266,56 @@
         if (!panel) continue;
         panel.classList.toggle("hidden", !show);
         if (!show) continue;
+        const data = this.thermalData;
+        const inst = this._instances.get(wrap);
+        const full = this.thermalFidelity === "full";
+        panel.querySelector(".ws-fid-preview")?.classList.toggle("active", !full);
+        panel.querySelector(".ws-fid-full")?.classList.toggle("active", full);
+        const stations = panel.querySelector(".ws-station-count");
+        if (stations) {
+          stations.textContent = data?.ok && data.preview_stations
+            ? (data.fidelity === "full"
+              ? `${data.full_stations} stations`
+              : `${data.preview_stations} of ${data.full_stations} stations`)
+            : "";
+        }
+        if (inst?.marginPlot) inst.marginPlot.setData(data);
         const kpis = panel.querySelector(".thermal-kpis");
         const spark = panel.querySelector(".ws-thermal-spark");
         const velSpark = panel.querySelector(".ws-velocity-spark");
         const note = panel.querySelector(".thermal-note");
-        if (!this.thermalData) {
+        if (!data) {
           if (kpis) kpis.innerHTML = "";
           if (note) note.textContent = "Click Preview thermal for a fast solve.";
-          return;
+          continue;
         }
-        if (this.thermalData.skipped) {
-          if (note) note.textContent = this.thermalData.reason || "Thermal preview skipped.";
-          return;
+        if (data.skipped) {
+          if (note) note.textContent = data.reason || "Thermal preview skipped.";
+          continue;
         }
-        if (this.thermalData.error) {
-          if (note) note.textContent = this.thermalData.error;
-          return;
+        if (data.error) {
+          if (note) note.textContent = data.error;
+          continue;
         }
-        const s = this.thermalData.summary;
+        const s = data.summary;
         if (s && kpis) {
           kpis.innerHTML = `
             <div class="thermal-kpi"><span>Q</span><strong>${s.Q_total_kW} kW</strong></div>
             <div class="thermal-kpi"><span>T_wall max</span><strong>${s.T_wall_max_K} K</strong></div>
+            ${s.min_margin_K != null
+              ? `<div class="thermal-kpi"><span>min margin</span><strong>${s.min_margin_K} K</strong></div>`
+              : ""}
             <div class="thermal-kpi"><span>Δp</span><strong>${s.dp_bar} bar</strong></div>
             <div class="thermal-kpi"><span>T_out</span><strong>${s.outlet_T_K} K</strong></div>
           `;
         }
-        if (spark) this._drawThermalSpark(spark, this.thermalData);
-        if (velSpark) this._drawVelocitySpark(velSpark, this.thermalData);
+        if (spark) this._drawThermalSpark(spark, data);
+        if (velSpark) this._drawVelocitySpark(velSpark, data);
         if (note) {
-          const n = this.thermalData.preview_stations;
-          const warn = (this.thermalData.warnings || []).join(" · ");
-          note.textContent = n
-            ? `Fast preview · ${n} stations${warn ? ` · ${warn}` : ""}`
+          const warn = (data.warnings || []).join(" · ");
+          const label = data.fidelity === "full" ? "Full solve" : "Fast preview";
+          note.textContent = data.preview_stations
+            ? `${label}${warn ? ` · ${warn}` : ""}`
             : "";
         }
       }
@@ -1084,7 +1334,11 @@
         if (note) note.textContent = "Running thermal preview…";
       }
       try {
-        const data = await postPreview("regen/thermal", cfg, {}, { signal });
+        const data = await postPreview(
+          "regen/thermal", cfg,
+          { fidelity: this.thermalFidelity || "preview" },
+          { signal }
+        );
         if (this._isStale("thermal", seq)) return;
         this.thermalData = data;
         this._updateThermalPanels();
@@ -1298,6 +1552,17 @@
           <p class="workspace-preview-hint ws-cooling-status"></p>
           <div class="thermal-preview-panel hidden">
             <div class="thermal-kpis"></div>
+            <div class="regen-margin-plot">
+              <div class="regen-margin-head">
+                <span class="regen-plot-label">Thermal margin — hot wall vs limit</span>
+                <span class="thermal-fidelity">
+                  <button type="button" class="btn-inline ws-fid-preview active">Fast preview</button>
+                  <button type="button" class="btn-inline ws-fid-full">Full stations</button>
+                  <span class="ws-station-count"></span>
+                </span>
+              </div>
+              <canvas class="ws-margin-plot"></canvas>
+            </div>
             <div class="regen-thermal-plots">
               <div class="regen-plot-cell">
                 <span class="regen-plot-label">Hot wall temperature</span>
@@ -1334,10 +1599,20 @@
 
       const section = new ThroatSectionCanvas(wrap.querySelector(".ws-throat-section"));
       const mesh3d = new ChannelMesh3D(wrap.querySelector(".ws-channel-3d"));
+      const marginPlot = new MarginPlotCanvas(wrap.querySelector(".ws-margin-plot"));
       mountViewportZoom(wrap.querySelector(".ws-cool-section-view"), () => section);
       mountViewportZoom(wrap.querySelector(".ws-cool-3d-view"), () => mesh3d);
-      this._instances.set(wrap, { section, mesh3d, wrap, editor });
-      this._mounted.push(section, mesh3d);
+      this._instances.set(wrap, { section, mesh3d, marginPlot, wrap, editor });
+      this._mounted.push(section, mesh3d, marginPlot);
+
+      const setFidelity = (fidelity) => {
+        if (this.thermalFidelity === fidelity) return;
+        this.thermalFidelity = fidelity;
+        this._updateThermalPanels();
+        this._fetchThermal();
+      };
+      wrap.querySelector(".ws-fid-preview").addEventListener("click", () => setFidelity("preview"));
+      wrap.querySelector(".ws-fid-full").addEventListener("click", () => setFidelity("full"));
 
       const slider = wrap.querySelector(".ws-axial-slider");
       slider.addEventListener("input", () => {
