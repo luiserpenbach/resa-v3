@@ -43,7 +43,8 @@ def main():
     print(f"h_in kJ/kg:        {a['inlet_h_kJ_kg']:.1f}")
     print(f"dh march kJ/kg:    {a['dh_kJ_kg']:.1f}")
     print(f"Q/mdot kJ/kg:      {a['Q_total_kW'] / sol.mdot_total:.1f}")
-    print(f"closure kW:        {a['energy_balance_kW']:.2e}")
+    print(f"Q cold side kW:    {a['Q_total_cold_kW']:.1f}")
+    print(f"closure kW:        {a['energy_balance_kW']:.2e}  (hot-side Q - coolant-side Q)")
 
     cp_equiv = a["dh_kJ_kg"] / max(a["outlet_T_K"] - a["inlet_T_K"], 1e-6)
     print(f"equiv cp K avg:    {cp_equiv:.2f} kJ/kg/K (EOS, not constant)")

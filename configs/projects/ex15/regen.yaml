@@ -1,4 +1,4 @@
-# High-fidelity regen channel layout + solver for EX15 (H2/GOX, ε = 50).
+# High-fidelity regen channel layout + solver for EX15 (H2/GOX; ε from design.yaml).
 # Contour and hot-gas properties sync from the engine run by default.
 meta:
   name: ex15_regen
@@ -55,9 +55,9 @@ solver:
   enabled: true
   coolant: Hydrogen
   mdot_from_engine: true
-  # Default mdot_from_engine uses O/F/(1+O/F) for oxidizer-side coolants (E2 N2O).
-  # H2 fuel-side regen needs the fuel mass fraction of engine mdot:
-  coolant_fraction: 0.153846   # 1 / (1 + 5.5)
+  # H2 regen cools with the fuel flow: 1 / (1 + O/F) of engine mdot,
+  # tracked automatically from the design O/F.
+  coolant_side: fuel
   inlet:
     pressure_bar: 85.0
     temperature_K: 90.0
