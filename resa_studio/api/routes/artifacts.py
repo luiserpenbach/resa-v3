@@ -16,7 +16,7 @@ def _safe_artifact_path(engine: str, config_hash: str, filepath: str) -> Path:
     if not outdir.is_dir():
         raise HTTPException(status_code=404, detail="run folder not found")
     target = (outdir / filepath).resolve()
-    if not str(target).startswith(str(outdir)):
+    if not target.is_relative_to(outdir):
         raise HTTPException(status_code=400, detail="invalid artifact path")
     if not target.is_file():
         raise HTTPException(status_code=404, detail="artifact not found")

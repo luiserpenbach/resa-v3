@@ -62,6 +62,3 @@ class Profile1D:
             return np.full_like(x, self._const, dtype=float)
         return np.asarray(self._fn(x), dtype=float)
 
-    @property
-    def is_constant(self) -> bool:
-        return self._const is not None

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +70,9 @@ def load_campaign(path: str | Path) -> CampaignSpec:
 
 
 def _write_rollup(summaries: list[dict], path: Path) -> None:
-    keys = list({k for row in summaries for k in row})
+    # deterministic column order (insertion order across rows), so rollup
+    # CSVs diff cleanly between runs
+    keys = list(dict.fromkeys(k for row in summaries for k in row))
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=keys)
         w.writeheader()

@@ -44,8 +44,7 @@ class CoolantState:
 class Coolant:
     def __init__(self, name: str):
         self.name = name
-        self._is_n2o = name.upper().replace("_", "") in _N2O_NAMES \
-            or name.upper() == "NITROUSOXIDE"
+        self._is_n2o = name.upper().replace("_", "") in _N2O_NAMES
         self.cp_name = "NitrousOxide" if self._is_n2o else name
         self.p_crit = PropsSI("PCRIT", self.cp_name)
         self.T_crit = PropsSI("TCRIT", self.cp_name)

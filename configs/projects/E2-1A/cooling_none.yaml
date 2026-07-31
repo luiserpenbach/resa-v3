@@ -1,5 +1,6 @@
-# E2-1A has no active regen cooling. Placeholder satisfies RESA schema and
-# throat-circumference sanity checks only (not used in thermal sizing).
+# E2-1A cooling-block geometry — satisfies the RESA schema and the
+# throat-circumference sanity check only. Regen thermal analysis is driven
+# by the `regen:` block in design.yaml, not by this file.
 coolant: "N2O"
 n_channels: 50
 channel_width_m: 0.0010

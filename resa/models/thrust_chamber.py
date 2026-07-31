@@ -90,7 +90,7 @@ def evaluate_point(
         of=of, mdot=mdot, mdot_ox=mdot_ox, mdot_fuel=mdot_fuel,
         pc_bar=pc_bar, pe_bar=pe / _BAR, thrust_N=thrust, isp_s=isp,
         cf=cf, cstar_eff_m_s=cstar_eff, exit_mach=Me, gamma=g,
-        separated=separated, comb=comb, pc_converged=pc_converged,
+        separated=separated, pc_converged=pc_converged,
     )
 
 

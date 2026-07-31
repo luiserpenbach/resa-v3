@@ -1,7 +1,10 @@
 """RESA Studio API tests."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
@@ -175,7 +178,8 @@ def test_get_run_includes_config(client):
     assert body["analysis_mode"] == "design"
     assert body["config"]["operating_point"]["thrust_N"] > 0
     assert body["config_source"] is not None
-    assert body.get("writable") is True
+    # Run snapshots are read-only: save_config only accepts configs/projects/.
+    assert body.get("writable") is False
 
 
 def test_preview_contour(client):
@@ -221,6 +225,170 @@ def test_preview_pipeline_cache(client):
     stats2 = client.get("/api/preview/cache/stats").json()
     assert stats2["hits"] >= 1
     assert stats2["entries"] >= 1
+
+
+def test_preview_cache_slow_run_still_fresh(monkeypatch):
+    """An entry from a pipeline slower than the TTL must be fresh on arrival."""
+    import time as _time
+
+    from resa_studio.adapters import preview_cache as pc
+
+    calls = {"n": 0}
+
+    def fake_run(cfg):
+        calls["n"] += 1
+        _time.sleep(0.15)
+        return "result"
+
+    monkeypatch.setattr(pc, "pipeline_run", fake_run)
+    cache = pc.PipelinePreviewCache(ttl_s=0.1)
+    data = {"engine": "X"}
+    cache.get_or_run(data, lambda d: "cfg")
+    cache.get_or_run(data, lambda d: "cfg")   # within TTL of *completion*
+    assert calls["n"] == 1
+
+
+def test_preview_cache_waiters_do_not_stampede(monkeypatch):
+    """Waiters unblocked by the leader reuse its result, run nothing."""
+    import threading
+
+    from resa_studio.adapters import preview_cache as pc
+
+    calls = {"n": 0}
+    release = threading.Event()
+
+    def fake_run(cfg):
+        calls["n"] += 1
+        release.wait(timeout=5.0)
+        return "result"
+
+    monkeypatch.setattr(pc, "pipeline_run", fake_run)
+    cache = pc.PipelinePreviewCache(ttl_s=60.0)
+    data = {"engine": "X"}
+    results = []
+
+    def worker():
+        results.append(cache.get_or_run(data, lambda d: "cfg"))
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    threads[0].start()
+    while calls["n"] == 0:      # leader inside fake_run
+        pass
+    for t in threads[1:]:
+        t.start()
+    release.set()
+    for t in threads:
+        t.join(timeout=5.0)
+    assert calls["n"] == 1
+    assert len(results) == 4
+    assert all(r == ("cfg", "result") for r in results)
+
+
+def test_preview_cache_failed_leader_single_retry(monkeypatch):
+    """After a leader fails, wakers re-contend: one retry, not a herd."""
+    import threading
+
+    from resa_studio.adapters import preview_cache as pc
+
+    calls = {"n": 0}
+    release = threading.Event()
+    concurrent = {"now": 0, "max": 0}
+    guard = threading.Lock()
+
+    def fake_run(cfg):
+        with guard:
+            calls["n"] += 1
+            concurrent["now"] += 1
+            concurrent["max"] = max(concurrent["max"], concurrent["now"])
+        try:
+            if calls["n"] == 1:
+                release.wait(timeout=5.0)
+                raise RuntimeError("leader dies")
+            return "result"
+        finally:
+            with guard:
+                concurrent["now"] -= 1
+
+    monkeypatch.setattr(pc, "pipeline_run", fake_run)
+    cache = pc.PipelinePreviewCache(ttl_s=60.0)
+    data = {"engine": "X"}
+    outcomes = []
+
+    def worker():
+        try:
+            outcomes.append(cache.get_or_run(data, lambda d: "cfg"))
+        except RuntimeError:
+            outcomes.append("error")
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    threads[0].start()
+    while calls["n"] == 0:
+        pass
+    for t in threads[1:]:
+        t.start()
+    release.set()
+    for t in threads:
+        t.join(timeout=5.0)
+    assert outcomes.count("error") == 1          # only the failed leader errors
+    assert outcomes.count(("cfg", "result")) == 3
+    assert concurrent["max"] == 1                # never more than one run at once
+
+
+def test_relocated_out_root_outside_repo(tmp_path):
+    """RESA_OUT_ROOT outside the repo must not 500 the run endpoints."""
+    from resa_studio.adapters.config_service import ConfigService
+    from resa_studio.adapters.run_service import RunService
+
+    out_root = tmp_path / "external-out"
+    out_root.mkdir()
+    svc = RunService(out_root=out_root)
+    assert svc.list_runs() == []
+
+    out = svc.run_full(config_path=CI_CONFIG)
+    assert out.outdir is not None
+    assert out.outdir.is_relative_to(out_root)
+
+    runs = svc.list_runs()
+    assert len(runs) == 1
+    # identifier falls back to an absolute path and stays loadable
+    outdir_id = runs[0]["outdir"]
+    assert Path(outdir_id).is_absolute()
+    snapshot = Path(outdir_id) / "config_resolved.yaml"
+    cs = ConfigService(out_root=out_root)
+    resolved = cs.resolve_path(snapshot)
+    assert resolved["writable"] is False
+
+    loaded = svc.load_existing(runs[0]["engine"], runs[0]["config_hash"])
+    assert loaded is not None
+    assert loaded["config"] is not None
+
+
+def test_relocated_projects_root_outside_repo(tmp_path):
+    """RESA_PROJECTS_ROOT outside the repo: configs load, save, stay writable."""
+    import shutil
+
+    from resa_studio.adapters.config_service import ConfigService
+
+    projects_root = tmp_path / "external-projects"
+    shutil.copytree(
+        Path("configs/projects/ex15"), projects_root / "ex15",
+    )
+    # external project needs its shared fragments reachable — inline them
+    cfg_path = projects_root / "ex15" / "design.yaml"
+    from resa.config.loader import load_resolved_dict
+
+    data = load_resolved_dict(Path("configs/projects/ex15/design.yaml"))
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    cs = ConfigService(projects_root=projects_root)
+    resolved = cs.resolve_path(cfg_path)
+    assert resolved["writable"] is True
+    body = dict(resolved["config"])
+    body["operating_point"] = dict(body["operating_point"])
+    body["operating_point"]["thrust_N"] = 16161
+    saved = cs.save_config(resolved["save_path"], body)
+    assert saved["ok"] is True
+    assert cs.resolve_path(cfg_path)["config"]["operating_point"]["thrust_N"] == 16161
 
 
 def test_preview_regen_thermal(client):
@@ -285,10 +453,66 @@ def test_save_preserves_yaml_file_refs(client):
         saved = out_file.read_text(encoding="utf-8")
         assert "propellants: prop_n2o_ethanol.yaml" in saved
         assert "chamber: chamber_E2_TC_01.yaml" in saved
-        assert "analyze_point:" not in saved
-        assert "geometry:" not in saved
+        saved_doc = yaml.safe_load(saved)
+        assert "analyze_point" not in saved_doc
+        assert "geometry" not in saved_doc
     finally:
         out_file.write_text(original, encoding="utf-8")
+
+
+def test_save_overlay_edit_wins_over_explicit_null(client):
+    """Editing a key that is explicitly null on disk must keep the edit."""
+    from resa_studio.settings import REPO_ROOT
+
+    save_target = "configs/projects/E2-1A/asbuilt.yaml"
+    resolved = client.get("/api/config/resolve", params={"config_path": save_target}).json()
+    out_file = REPO_ROOT / save_target
+    original = out_file.read_text(encoding="utf-8")
+
+    # asbuilt.yaml has `operating_point: null` — switch it back to design mode.
+    cfg = dict(resolved["config"])
+    cfg["operating_point"] = {
+        "thrust_N": 2400, "pc_bar": 26.0, "of_ratio": 4.0, "eta_cstar": 0.93,
+    }
+    cfg["analyze_point"] = None
+    cfg["geometry"] = None
+    try:
+        r = client.post(
+            "/api/config/save",
+            json={"config_path": save_target, "config": cfg},
+        )
+        assert r.status_code == 200
+        saved_doc = yaml.safe_load(out_file.read_text(encoding="utf-8"))
+        assert saved_doc["operating_point"] is not None
+        assert saved_doc["operating_point"]["thrust_N"] == 2400
+        re_resolved = client.get(
+            "/api/config/resolve", params={"config_path": save_target}
+        ).json()
+        assert re_resolved["config"]["operating_point"]["thrust_N"] == 2400
+    finally:
+        out_file.write_text(original, encoding="utf-8")
+
+
+def test_save_overlay_keeps_ref_equal_to_inherited(client):
+    """A fragment ref whose content equals the inherited value must survive a save."""
+    from resa_studio.settings import REPO_ROOT
+
+    thin = REPO_ROOT / "configs/projects/E2-1A/_test_thin.yaml"
+    thin.write_text(
+        "base: design.yaml\nchamber: chamber_E2_TC_01.yaml\n", encoding="utf-8"
+    )
+    rel = "configs/projects/E2-1A/_test_thin.yaml"
+    try:
+        resolved = client.get("/api/config/resolve", params={"config_path": rel}).json()
+        r = client.post(
+            "/api/config/save",
+            json={"config_path": rel, "config": resolved["config"]},
+        )
+        assert r.status_code == 200
+        saved = thin.read_text(encoding="utf-8")
+        assert "chamber: chamber_E2_TC_01.yaml" in saved
+    finally:
+        thin.unlink(missing_ok=True)
 
 
 def test_campaigns_list(client):

@@ -17,22 +17,26 @@ configs/
 │   ├── prop_n2o_ethanol.yaml
 │   ├── chamber_e2.yaml
 │   └── cooling_e2_c1.yaml
-└── e2_c1/                      one engine / campaign
-    ├── design.yaml             full engine config (design mode)
-    ├── asbuilt.yaml            inherits design → analyze mode
-    ├── hf02.yaml               inherits asbuilt → HF02 variant
-    ├── regen.yaml              regen fragment (not a full engine config)
-    ├── design_regen.yaml       design + regen
-    ├── asbuilt_regen.yaml
-    └── hf02_regen.yaml
-└── ex15/                       15 kN H2/GOX (see design.yaml for ε)
-    ├── design.yaml
-    ├── regen.yaml
-    └── design_regen.yaml
+├── projects/                   engine projects (each folder = one project)
+│   ├── e2_c1/
+│   │   ├── project.yaml        project metadata (name, primary config)
+│   │   ├── design.yaml         full engine config (design mode)
+│   │   ├── asbuilt.yaml        inherits design → analyze mode
+│   │   ├── hf02.yaml           inherits asbuilt → HF02 variant
+│   │   ├── regen.yaml          regen fragment (not a full engine config)
+│   │   ├── design_regen.yaml   design + regen
+│   │   ├── asbuilt_regen.yaml
+│   │   └── hf02_regen.yaml
+│   ├── E2-1A/                  design + as-built + hot-fire variants
+│   └── ex15/                   15 kN H2/GOX (see design.yaml for ε)
+│       ├── design.yaml
+│       ├── regen.yaml
+│       └── design_regen.yaml
 └── ci/                         offline table configs for tests / CI
     ├── e2_c1_design.yaml
     ├── e2_c1_asbuilt.yaml
     ├── e2_c1_hf02.yaml
+    ├── e2_c1_design_regen.yaml
     └── ex15_design.yaml
 ```
 
@@ -41,18 +45,18 @@ configs/
 Multi-config report batches live in `campaigns/*.yaml`:
 
 ```yaml
-name: e2_regen
-output: e2_output_regen
+name: e2_c1_regen
+output: e2_c1_output_regen
 rollup: true
 configs:
-  - ../configs/e2_c1/design_regen.yaml
+  - ../../configs/projects/e2_c1/design_regen.yaml
 diffs:
-  - a: ../configs/e2_c1/asbuilt_regen.yaml
-    b: ../configs/e2_c1/hf02_regen.yaml
+  - a: ../../configs/projects/e2_c1/asbuilt_regen.yaml
+    b: ../../configs/projects/e2_c1/hf02_regen.yaml
     output: diff_asbuilt_vs_hf02.txt
 regen_diffs:
-  - a: ../configs/e2_c1/asbuilt_regen.yaml
-    b: ../configs/e2_c1/hf02_regen.yaml
+  - a: ../../configs/projects/e2_c1/asbuilt_regen.yaml
+    b: ../../configs/projects/e2_c1/hf02_regen.yaml
     output: regen_diff_asbuilt_vs_hf02.html
 ```
 
@@ -233,7 +237,7 @@ Controls Rao/Bell (or conical) contour generation.
 | `l_star_m` | float | — | > 0 | Characteristic length L* [m] |
 | `contour` | string | `"rao_bell"` | `rao_bell`, `conical` | Contour method (`moc` reserved for a future release) |
 | `bell_fraction` | float | 0.8 | 0.5–1.0 | Bell length vs 15° cone reference |
-| `conv_half_angle_deg` | float | 30 | 0–60 | Convergent half-angle [deg] |
+| `conv_half_angle_deg` | float | 40 | 0–60 | Convergent half-angle [deg] |
 | `rt_upstream_factor` | float | 1.5 | > 0 | Upstream throat arc R / R_t |
 | `rt_downstream_factor` | float | 0.382 | > 0 | Downstream throat arc R / R_t |
 | `rc_entrance_factor` | float | 0.5 | 0–1.5 | Cylinder→convergent fillet R / D_c |
@@ -602,8 +606,8 @@ If import still fails, try the matching STL file instead.
 ### Engine sizing only
 
 ```bash
-python -m resa run    configs/e2_c1/design.yaml
-python -m resa report configs/e2_c1/design.yaml
+python -m resa run    configs/projects/e2_c1/design.yaml
+python -m resa report configs/projects/e2_c1/design.yaml
 ```
 
 ### Engine + regen campaign

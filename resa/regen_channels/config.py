@@ -8,9 +8,17 @@ from __future__ import annotations
 
 from typing import Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel as _PydanticBaseModel
+from pydantic import ConfigDict, Field, model_validator
 
 ProfileSpec = Union[float, List[List[float]], dict]
+
+
+class BaseModel(_PydanticBaseModel):
+    """Strict base: unknown keys are rejected, matching the engine schema
+    (a typo like ``heigth:`` must fail loudly, not fall back to defaults)."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class MetaCfg(BaseModel):
@@ -136,7 +144,7 @@ class SolverCfg(BaseModel):
                                              temperature_K=278.0)
     roughness: float = 8.0e-6            # LPBF as-built wall roughness [m]
     curvature_enhancement: bool = True   # helix curvature on HTC & friction
-    max_iter_wall: int = 80
+    max_iter_wall: int = 200             # brentq iterations per wall solve
 
 
 class ExportCfg(BaseModel):
@@ -194,19 +202,23 @@ class RegenConfig(BaseModel):
     @model_validator(mode="after")
     def _sync_compat(self) -> "RegenConfig":
         """Legacy ``solver.mdot_from_engine: false`` opts out of mdot sync."""
-        if not self.solver.mdot_from_engine and self.sync.mdot:
-            return self.model_copy(
-                update={"sync": self.sync.model_copy(update={"mdot": False})})
-        if self.contour.type == "from_engine" and not self.sync.contour:
+        out = self
+        if not out.solver.mdot_from_engine and out.sync.mdot:
+            # Normalize first (model_copy does not re-validate), then run the
+            # remaining checks against the normalized state — an early return
+            # here used to skip them entirely.
+            out = out.model_copy(
+                update={"sync": out.sync.model_copy(update={"mdot": False})})
+        if out.contour.type == "from_engine" and not out.sync.contour:
             raise ValueError(
                 "contour.type=from_engine requires sync.contour=true, or set "
                 "contour.type to parametric/points with sync.contour=false"
             )
-        if not self.sync.mdot and self.solver.mdot_total is None:
+        if not out.sync.mdot and out.solver.mdot_total is None:
             raise ValueError(
                 "sync.mdot=false requires solver.mdot_total in the regen YAML"
             )
-        return self
+        return out
 
     @classmethod
     def from_yaml(cls, path: str) -> "RegenConfig":

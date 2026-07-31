@@ -18,9 +18,12 @@ app = FastAPI(
     version=__version__,
 )
 
+# The frontend is served same-origin by this app; CORS exists only for a
+# separate localhost dev server. A wildcard would let any web page the user
+# visits call the file-writing endpoints on 127.0.0.1.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

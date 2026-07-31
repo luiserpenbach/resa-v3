@@ -61,6 +61,11 @@ def generate(
     Rc = np.sqrt(ch.contraction_ratio) * Rt          # chamber radius
     beta = ch.conv_half_angle_deg * _DEG             # convergent half-angle
 
+    # ch.n_stations sets the approximate total contour point count,
+    # distributed across the segments in fixed proportions.
+    def npts(frac: float) -> int:
+        return max(8, int(round(frac * ch.n_stations)))
+
     # throat arc radii
     R1 = ch.rt_upstream_factor * Rt                  # upstream (convergent) arc
     R2 = ch.rt_downstream_factor * Rt                # downstream (divergent) arc
@@ -84,7 +89,7 @@ def generate(
     # CONVERGENT SIDE (x <= 0)
     # ------------------------------------------------------------------ #
     # upstream throat arc: center (0, Rt+R1), phi 0..beta toward -x
-    phi_up = np.linspace(0.0, beta, 60)
+    phi_up = np.linspace(0.0, beta, npts(0.17))
     x_arc_up = -R1 * np.sin(phi_up)
     r_arc_up = (Rt + R1) - R1 * np.cos(phi_up)
     xA1, rA1 = x_arc_up[-1], r_arc_up[-1]            # arc->cone tangent point
@@ -93,9 +98,18 @@ def generate(
     Rf = ch.rc_entrance_factor * 2.0 * Rc
     rB = Rc - Rf * (1.0 - np.cos(beta))              # fillet -> cone tangent
     dx_cone = (rB - rA1) / np.tan(beta)
+    if dx_cone < 0.0:
+        raise ValueError(
+            "convergent geometry infeasible: the entrance-fillet tangent radius "
+            f"(rB = {rB * 1e3:.2f} mm) is below the throat-arc tangent radius "
+            f"(rA1 = {rA1 * 1e3:.2f} mm), so the cone segment would run "
+            "backwards and the contour self-intersect. Increase "
+            "contraction_ratio, or reduce rt_upstream_factor, "
+            "rc_entrance_factor, or conv_half_angle_deg."
+        )
     xB = xA1 - dx_cone
     xc = xB - Rf * np.sin(beta)                      # cylinder -> fillet tangent
-    theta_f = np.linspace(0.0, beta, 40)
+    theta_f = np.linspace(0.0, beta, npts(0.11))
     x_fillet = xc + Rf * np.sin(theta_f)
     r_fillet = Rc - Rf * (1.0 - np.cos(theta_f))
 
@@ -124,7 +138,7 @@ def generate(
     alpha = theta_n * _DEG
 
     # downstream throat arc: phi 0..arc_end_angle
-    phi_dn = np.linspace(0.0, arc_end_angle, 60)
+    phi_dn = np.linspace(0.0, arc_end_angle, npts(0.17))
     x_arc_dn = R2 * np.sin(phi_dn)
     r_arc_dn = (Rt + R2) - R2 * np.cos(phi_dn)
     xN, rN = x_arc_dn[-1], r_arc_dn[-1]              # divergent start (tangent)
@@ -132,11 +146,19 @@ def generate(
     if ch.contour == "conical":
         # straight cone at angle alpha until r reaches Re
         L_div = xN + (Re - rN) / np.tan(alpha)
-        x_div_extra, r_div_extra = _segment(xN, L_div, rN, Re, 80)
+        x_div_extra, r_div_extra = _segment(xN, L_div, rN, Re, npts(0.35))
     else:
         # bell length: fraction of a 15deg conical of the same area ratio
         L_cone15 = (Re - Rt) / np.tan(15.0 * _DEG)
         L_div = ch.bell_fraction * L_cone15
+        if L_div <= xN:
+            raise ValueError(
+                f"bell length L_div = {L_div * 1e3:.1f} mm does not extend past "
+                f"the downstream throat arc (x = {xN * 1e3:.1f} mm) — the area "
+                f"ratio (eps = {eps:.2f}) is too small for bell_fraction = "
+                f"{ch.bell_fraction}. Increase eps or bell_fraction, or use "
+                "contour='conical'."
+            )
         # quadratic Bezier: P0=N (slope tan tn), P2=E (slope tan te),
         # P1 = intersection of the two tangent lines.
         mN = np.tan(theta_n * _DEG)
@@ -144,7 +166,7 @@ def generate(
         xE, rE = L_div, Re
         xP1 = (rE - rN - mE * xE + mN * xN) / (mN - mE)
         rP1 = rN + mN * (xP1 - xN)
-        t = np.linspace(0.0, 1.0, 120)
+        t = np.linspace(0.0, 1.0, npts(0.35))
         xb = (1 - t) ** 2 * xN + 2 * (1 - t) * t * xP1 + t**2 * xE
         rb = (1 - t) ** 2 * rN + 2 * (1 - t) * t * rP1 + t**2 * rE
         x_div_extra, r_div_extra = xb, rb
@@ -152,8 +174,8 @@ def generate(
     # ------------------------------------------------------------------ #
     # ASSEMBLE full contour, throat at x=0
     # ------------------------------------------------------------------ #
-    x_cyl, r_cyl = _segment(x_inj, xc, Rc, Rc, 30)
-    x_cone, r_cone = _segment(xB, xA1, rB, rA1, 40)
+    x_cyl, r_cyl = _segment(x_inj, xc, Rc, Rc, npts(0.09))
+    x_cone, r_cone = _segment(xB, xA1, rB, rA1, npts(0.11))
     segs_x = [x_cyl, x_fillet, x_cone, x_arc_up[::-1], x_arc_dn, x_div_extra]
     segs_r = [r_cyl, r_fillet, r_cone, r_arc_up[::-1], r_arc_dn, r_div_extra]
     x = np.concatenate(segs_x)

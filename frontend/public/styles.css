@@ -768,6 +768,8 @@ input[type="range"] { width: 100%; min-height: auto; padding: 0; }
   color: var(--text-muted);
 }
 .results-source-badge.is-full, .plot-source-badge.is-full { color: var(--accent); background: var(--accent-dim); }
+.plot-source-badge.is-saved { color: var(--accent); background: var(--accent-dim); }
+.results-source-badge.is-fast, .plot-source-badge.is-live { color: var(--warning); background: rgba(240, 160, 48, 0.12); }
 
 .provenance-details, .compare-results, .compare-config-details {
   margin-top: var(--gap-sm);
@@ -1063,19 +1065,16 @@ input[type="range"] { width: 100%; min-height: auto; padding: 0; }
   background: var(--surface);
 }
 
-.propellant-summary,
-.design-env-block {
+.propellant-summary {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.55rem 0.65rem;
   background: var(--surface-2);
 }
-.propellant-summary .form-subhead,
-.design-env-block .form-subhead {
+.propellant-summary .form-subhead {
   margin-top: 0;
 }
-.propellant-summary .form-hint,
-.design-env-block .form-hint {
+.propellant-summary .form-hint {
   margin-bottom: 0;
 }
 
@@ -1183,8 +1182,6 @@ input[type="range"] { width: 100%; min-height: auto; padding: 0; }
 }
 .tuple-row input { flex: 1; min-width: 0; }
 
-.design-header { margin: 0; }
-
 .analyze-form,
 .offdesign-form,
 .chamber-form,
@@ -1219,9 +1216,7 @@ input[type="range"] { width: 100%; min-height: auto; padding: 0; }
 .offdesign-sweep-section { margin-top: 0.35rem; }
 
 /* ── Tables (shared) ──────────────────────────────────────── */
-.axial-profile-table-wrap,
-.regen-profile-body,
-.table-scroll {
+.axial-profile-table-wrap {
   overflow-x: auto;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
@@ -1263,7 +1258,8 @@ table input {
 .constraints-list li { margin-bottom: 0.15rem; }
 .constraint-ok { color: var(--success); }
 .constraint-warn { color: var(--warning); }
-.constraint-error { color: var(--danger); }
+.constraint-error,
+.constraint-fail { color: var(--danger); }
 .constraint-jump {
   background: none;
   border: none;
@@ -1417,44 +1413,6 @@ table input {
   gap: 0.4rem;
   flex-wrap: wrap;
   margin-top: 0.28rem;
-}
-
-/* ── Regen profile editor (legacy) ────────────────────────── */
-.regen-profile-field { margin-bottom: 0.45rem; }
-.regen-profile-head label { font-weight: 500; font-size: var(--fs-sm); }
-.regen-profile-mode { margin-bottom: 0.25rem; }
-.regen-scalar-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
-.regen-scalar-row input { max-width: 8rem; width: auto; flex: 0 1 auto; }
-.regen-profile-table { margin: 0.25rem 0; }
-.regen-add-bp { margin-top: 0.2rem; }
-.bp-del { width: 1.45rem; height: 1.45rem; padding: 0; }
-
-.profile-breakpoints-row {
-  display: flex;
-  gap: 0.35rem;
-  overflow-x: auto;
-  padding: 0.25rem 0;
-}
-.profile-bp-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.15rem;
-  min-width: 44px;
-  flex-shrink: 0;
-}
-.profile-bp-x { font-size: 0.65rem; color: var(--text-muted); }
-.profile-bp-val { font-size: 0.65rem; }
-.profile-bp-slider {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  height: 80px;
-  width: auto;
 }
 
 /* ── Dialogs ──────────────────────────────────────────────── */

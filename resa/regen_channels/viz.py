@@ -75,6 +75,7 @@ def figure_geometry(lay: ChannelLayout) -> go.Figure:
     x = lay.x * MM
     fig = make_subplots(
         rows=2, cols=2, shared_xaxes=True,
+        specs=[[{}, {"secondary_y": True}], [{}, {}]],
         subplot_titles=("Contour & channel envelope",
                         "Helix angle & wrap",
                         "Channel cross-section",
@@ -88,8 +89,11 @@ def figure_geometry(lay: ChannelLayout) -> go.Figure:
     fig.add_trace(go.Scatter(x=x, y=np.degrees(lay.beta), name="beta [deg]",
                              line=dict(color="#d97706")), 1, 2)
     fig.add_trace(go.Scatter(x=x, y=np.degrees(lay.theta),
-                             name="wrap theta [deg]", yaxis="y4",
-                             line=dict(color="#2563eb")), 1, 2)
+                             name="wrap theta [deg]",
+                             line=dict(color="#2563eb")),
+                  row=1, col=2, secondary_y=True)
+    fig.update_yaxes(title_text="wrap theta [deg]", row=1, col=2,
+                     secondary_y=True, showgrid=False)
     fig.add_trace(go.Scatter(x=x, y=lay.w * MM, name="width w"), 2, 1)
     fig.add_trace(go.Scatter(x=x, y=lay.h * MM, name="height h"), 2, 1)
     fig.add_trace(go.Scatter(x=x, y=lay.t_rib * MM, name="rib t"), 2, 1)
@@ -198,6 +202,7 @@ def figure_coolant_path(
 
     fig = make_subplots(
         rows=1, cols=2, column_widths=[0.55, 0.45],
+        specs=[[{}, {"secondary_y": True}]],
         subplot_titles=("Coolant path in T–ρ space",
                         "Bulk coolant along the channel"),
         horizontal_spacing=0.08)
@@ -246,21 +251,21 @@ def figure_coolant_path(
         x=x_mm, y=path.T_sat_K, name="T_sat(p)",
         line=dict(color="#9333ea", dash="dash")), row=1, col=2)
     fig.add_trace(go.Scatter(
-        x=x_mm, y=p_bar, name="p [bar]", yaxis="y4",
-        line=dict(color="#0d9488")), row=1, col=2)
+        x=x_mm, y=p_bar, name="p [bar]",
+        line=dict(color="#0d9488")), row=1, col=2, secondary_y=True)
 
     dh = a.get("dh_kJ_kg", 0.0)
     bal = a.get("energy_balance_kW", 0.0)
     fig.update_xaxes(title_text="T [K]", row=1, col=1)
     fig.update_yaxes(title_text="ρ [kg/m³]", row=1, col=1)
     fig.update_xaxes(title_text="x [mm]", row=1, col=2)
-    fig.update_yaxes(title_text="T [K]", row=1, col=2)
+    fig.update_yaxes(title_text="T [K]", row=1, col=2, secondary_y=False)
+    fig.update_yaxes(title_text="p [bar]", row=1, col=2, secondary_y=True,
+                     showgrid=False)
     fig.update_layout(
         title=(f"Coolant circuit — Δh={dh:.0f} kJ/kg, "
                f"Q={a.get('Q_total_kW', 0):.1f} kW, "
                f"mdot={a.get('mdot_total', 0):.3f} kg/s, "
                f"energy closure {bal:.2e} kW"),
-        template="plotly_white", height=520, margin=dict(t=60),
-        yaxis4=dict(title="p [bar]", overlaying="y2", side="right",
-                    anchor="x2", showgrid=False))
+        template="plotly_white", height=520, margin=dict(t=60))
     return fig

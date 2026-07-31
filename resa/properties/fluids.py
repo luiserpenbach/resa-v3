@@ -53,15 +53,3 @@ def prop_dr(name: str, T: float, rho: float, fluid: str) -> float:
     return _cached_dr(name, T_q, rho_q, fluid)
 
 
-def transport(T: float, p: float, fluid: str) -> dict[str, float]:
-    """Bundle the four properties a heat-transfer correlation needs."""
-    return {
-        "rho": prop("D", T, p, fluid),
-        "cp": prop("C", T, p, fluid),
-        "mu": prop("V", T, p, fluid),
-        "k": prop("L", T, p, fluid),
-    }
-
-
-def cache_info() -> str:
-    return str(_cached.cache_info())

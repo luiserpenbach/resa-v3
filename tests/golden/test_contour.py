@@ -42,6 +42,48 @@ def test_chamber_subsonic(result):
     assert c.mach[0] < 1.0
 
 
+def test_n_stations_controls_point_count():
+    """chamber.n_stations sets the approximate contour resolution."""
+    from resa.config.loader import load_resolved_dict
+    from resa.config.schema import EngineConfig
+    from resa.pipeline import run
+
+    counts = {}
+    for n in (100, 400):
+        data = load_resolved_dict(CI_E2_DESIGN)
+        data["chamber"]["n_stations"] = n
+        res = run(EngineConfig.model_validate(data))
+        counts[n] = len(res.contour.x_m)
+        assert counts[n] == pytest.approx(n, rel=0.15)
+    assert counts[400] > counts[100]
+
+
+def test_low_contraction_ratio_raises():
+    """Infeasible convergent geometry must raise, not corrupt silently."""
+    from resa.config.loader import load_resolved_dict
+    from resa.config.schema import EngineConfig
+    from resa.pipeline import run
+
+    data = load_resolved_dict(CI_E2_DESIGN)
+    data["chamber"]["contraction_ratio"] = 2.0
+    with pytest.raises(ValueError, match="convergent geometry infeasible"):
+        run(EngineConfig.model_validate(data))
+
+
+def test_tiny_area_ratio_bell_raises():
+    """A bell whose length ends inside the throat arc must raise."""
+    from resa.config.loader import load_resolved_dict
+    from resa.config.schema import EngineConfig
+    from resa.pipeline import run
+
+    data = load_resolved_dict(CI_E2_DESIGN)
+    op = data["operating_point"]
+    op.pop("pe_bar", None)
+    op["eps"] = 1.05
+    with pytest.raises(ValueError, match="does not extend past"):
+        run(EngineConfig.model_validate(data))
+
+
 def test_lstar_roundtrip(result):
     """Volume integral of the contour from injector to throat reproduces L*."""
     c = result.contour

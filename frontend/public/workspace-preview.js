@@ -66,6 +66,25 @@
     return v.toExponential(1);
   }
 
+  /**
+   * Resolve theme CSS variables to concrete colors for Canvas 2D.
+   * `ctx.fillStyle = "var(--x)"` is invalid and silently falls back to black,
+   * so canvases must resolve variables via getComputedStyle. Called at the
+   * start of each draw so theme switches are picked up automatically.
+   */
+  function canvasColors() {
+    const s = getComputedStyle(document.documentElement);
+    const get = (name, fallback) => s.getPropertyValue(name).trim() || fallback;
+    return {
+      accent: get("--accent", "#4a9eff"),
+      border: get("--border", "#2a2d34"),
+      warning: get("--warning", "#f0a030"),
+      textMuted: get("--text-muted", "#8b949e"),
+      plotBg: get("--plot-bg", "#0f1014"),
+      bg: get("--bg", "#0f1014"),
+    };
+  }
+
   function attachViewMixin(viewer, { pan = false } = {}) {
     viewer.zoom = 1;
     viewer.panX = 0;
@@ -81,6 +100,7 @@
       viewer.draw();
     };
     viewer.resetZoom = () => viewer.fitView();
+    viewer._removeViewListeners = null;
 
     if (!pan || !viewer.canvas) return;
 
@@ -114,6 +134,10 @@
     });
     window.addEventListener("mousemove", onPanMove);
     window.addEventListener("mouseup", endPan);
+    viewer._removeViewListeners = () => {
+      window.removeEventListener("mousemove", onPanMove);
+      window.removeEventListener("mouseup", endPan);
+    };
   }
 
   const attachZoomMixin = (viewer) => attachViewMixin(viewer, { pan: false });
@@ -157,50 +181,6 @@
     return bar;
   }
 
-  /** Column-major 4×4 helpers for WebGL. */
-  function mat4Identity() {
-    const m = new Float32Array(16);
-    m[0] = m[5] = m[10] = m[15] = 1;
-    return m;
-  }
-
-  function mat4Multiply(a, b) {
-    const o = new Float32Array(16);
-    for (let c = 0; c < 4; c++) {
-      for (let r = 0; r < 4; r++) {
-        o[c * 4 + r] =
-          a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] +
-          a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
-      }
-    }
-    return o;
-  }
-
-  function mat4RotateX(rad) {
-    const c = Math.cos(rad), s = Math.sin(rad);
-    const m = mat4Identity();
-    m[5] = c; m[6] = s; m[9] = -s; m[10] = c;
-    return m;
-  }
-
-  function mat4RotateY(rad) {
-    const c = Math.cos(rad), s = Math.sin(rad);
-    const m = mat4Identity();
-    m[0] = c; m[2] = -s; m[8] = s; m[10] = c;
-    return m;
-  }
-
-  function mat4Ortho(l, r, b, t, n, f) {
-    const m = mat4Identity();
-    m[0] = 2 / (r - l);
-    m[5] = 2 / (t - b);
-    m[10] = -2 / (f - n);
-    m[12] = -(r + l) / (r - l);
-    m[13] = -(t + b) / (t - b);
-    m[14] = -(f + n) / (f - n);
-    return m;
-  }
-
   function meshBounds(vertices) {
     const min = [Infinity, Infinity, Infinity];
     const max = [-Infinity, -Infinity, -Infinity];
@@ -215,55 +195,6 @@
     return { center, extent };
   }
 
-  function normalizeMesh(vertices) {
-    const { center, extent } = meshBounds(vertices);
-    const out = new Float32Array(vertices.length * 3);
-    let j = 0;
-    for (const v of vertices) {
-      out[j++] = (v[0] - center[0]) / extent;
-      out[j++] = (v[1] - center[1]) / extent;
-      out[j++] = (v[2] - center[2]) / extent;
-    }
-    return out;
-  }
-
-  function regenProfilePoints(editor, paramKey) {
-    const cfg = editor?.config?.regen;
-    if (!cfg) return [];
-    const map = {
-      height_m: ["channels", "height"],
-      rib_width_m: ["channels", "rib", "width"],
-      wall_thickness_m: ["channels", "inner_wall_thickness"],
-    };
-    const path = map[paramKey];
-    if (!path) return [];
-    let obj = cfg;
-    for (const k of path) obj = obj?.[k];
-    if (typeof obj === "number") return [[-0.35, obj], [0.35, obj]];
-    if (Array.isArray(obj) && obj.length && Array.isArray(obj[0])) return obj.map((p) => [p[0], p[1]]);
-    return [];
-  }
-
-  function setRegenProfilePoint(editor, paramKey, idx, value) {
-    const map = {
-      height_m: ["regen", "channels", "height"],
-      rib_width_m: ["regen", "channels", "rib", "width"],
-      wall_thickness_m: ["regen", "channels", "inner_wall_thickness"],
-    };
-    const path = map[paramKey];
-    if (!path) return;
-    let obj = editor.config;
-    for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
-    const key = path[path.length - 1];
-    let prof = obj[key];
-    if (typeof prof === "number") {
-      prof = [[-0.35, prof], [0.35, prof]];
-      obj[key] = prof;
-    }
-    if (!Array.isArray(prof)) return;
-    if (prof[idx]) prof[idx][1] = value;
-  }
-
   /** 2D contour canvas — strict 1:1 axis scale (metres). */
   class ContourCanvas {
     constructor(canvas) {
@@ -275,6 +206,11 @@
       attachViewMixin(this, { pan: true });
       this._resizeObs = new ResizeObserver(() => this.draw());
       this._resizeObs.observe(canvas.parentElement || canvas);
+    }
+
+    destroy() {
+      this._resizeObs?.disconnect();
+      this._removeViewListeners?.();
     }
 
     setData(payload) {
@@ -295,6 +231,7 @@
     draw() {
       const ctx = this.ctx;
       const canvas = this.canvas;
+      const colors = canvasColors();
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.parentElement.getBoundingClientRect();
       const size = Math.min(rect.width - 8, 420);
@@ -306,7 +243,7 @@
       ctx.clearRect(0, 0, size, size);
 
       if (!this.data?.contour) {
-        ctx.fillStyle = "var(--text-muted)";
+        ctx.fillStyle = colors.textMuted;
         ctx.font = "12px system-ui,sans-serif";
         ctx.fillText("Contour preview loading…", 12, 24);
         return;
@@ -331,11 +268,11 @@
         this._drawGrid(ctx, { toX, toY, toYb, pad, plot, xMid, scale, size });
       }
 
-      ctx.strokeStyle = "var(--border)";
+      ctx.strokeStyle = colors.border;
       ctx.lineWidth = 1;
       ctx.strokeRect(pad, pad, plot, plot);
 
-      ctx.strokeStyle = "var(--accent)";
+      ctx.strokeStyle = colors.accent;
       ctx.lineWidth = 2;
       ctx.beginPath();
       for (let i = 0; i < xs.length; i++) {
@@ -355,7 +292,7 @@
       ctx.stroke();
 
       ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = "var(--text-muted)";
+      ctx.strokeStyle = colors.textMuted;
       ctx.beginPath();
       const tx = toX(0);
       ctx.moveTo(tx, pad);
@@ -363,7 +300,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.fillStyle = "var(--text-muted)";
+      ctx.fillStyle = colors.textMuted;
       ctx.font = "10px system-ui,sans-serif";
       ctx.fillText("throat", tx + 4, pad + 12);
       ctx.fillText("x (m)", pad + plot / 2 - 12, size - 6);
@@ -374,7 +311,7 @@
       ctx.restore();
 
       if (this.showDims && dim.throat_radius_m) {
-        this._drawDims(ctx, toX, toY, toYb, dim, xMin, xMax);
+        this._drawDims(ctx, toX, toY, toYb, dim, xMin, xMax, colors);
       }
     }
 
@@ -445,7 +382,7 @@
       ctx.restore();
     }
 
-    _drawDims(ctx, toX, toY, toYb, dim, xMin, xMax) {
+    _drawDims(ctx, toX, toY, toYb, dim, xMin, xMax, colors) {
       const Rt = dim.throat_radius_m;
       const Rc = dim.chamber_radius_m;
       const Re = dim.exit_radius_m;
@@ -454,8 +391,8 @@
       const tyb = toYb(Rt);
 
       const drawLeader = (x1, y1, x2, y2, label, lx, ly) => {
-        ctx.strokeStyle = "var(--warning)";
-        ctx.fillStyle = "var(--warning)";
+        ctx.strokeStyle = colors.warning;
+        ctx.fillStyle = colors.warning;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -494,7 +431,7 @@
 
       // Convergent length hint
       if (dim.convergent_length_m) {
-        ctx.fillStyle = "var(--text-muted)";
+        ctx.fillStyle = colors.textMuted;
         ctx.fillText(`Lconv ${mm(dim.convergent_length_m)}`, tx - 52, ty - 14);
       }
     }
@@ -515,16 +452,28 @@
         this._drag = true;
         this._last = [e.clientX, e.clientY];
       });
-      window.addEventListener("mouseup", () => { this._drag = false; });
-      window.addEventListener("mousemove", (e) => {
+      this._onWindowUp = () => { this._drag = false; };
+      this._onWindowMove = (e) => {
         if (!this._drag) return;
         this.rotY += (e.clientX - this._last[0]) * 0.01;
         this.rotX += (e.clientY - this._last[1]) * 0.01;
         this._last = [e.clientX, e.clientY];
         this.draw();
-      });
+      };
+      window.addEventListener("mouseup", this._onWindowUp);
+      window.addEventListener("mousemove", this._onWindowMove);
       this._resizeObs = new ResizeObserver(() => this.draw());
       if (canvas.parentElement) this._resizeObs.observe(canvas.parentElement);
+    }
+
+    destroy() {
+      window.removeEventListener("mouseup", this._onWindowUp);
+      window.removeEventListener("mousemove", this._onWindowMove);
+      this._resizeObs?.disconnect();
+      if (this.gl && this._buf) {
+        this.gl.deleteBuffer(this._buf);
+        this._buf = null;
+      }
     }
 
     setData(payload) {
@@ -608,8 +557,10 @@
         }`;
       const prog = this._program(gl, vs, fs);
       gl.useProgram(prog);
-      const buf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      // Create the vertex buffer once and reuse it — allocating a fresh
+      // buffer per frame leaks GPU memory.
+      if (!this._buf) this._buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._buf);
       const inter = new Float32Array(mesh.verts.length + mesh.norms.length);
       for (let i = 0, j = 0; i < mesh.verts.length; i += 3, j += 6) {
         inter[j] = mesh.verts[i]; inter[j + 1] = mesh.verts[i + 1]; inter[j + 2] = mesh.verts[i + 2];
@@ -656,6 +607,11 @@
       this._resizeObs.observe(canvas.parentElement || canvas);
     }
 
+    destroy() {
+      this._resizeObs?.disconnect();
+      this._removeViewListeners?.();
+    }
+
     setData(section) {
       this.section = section;
       this.draw();
@@ -670,7 +626,7 @@
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "var(--text-muted)";
+        ctx.fillStyle = canvasColors().textMuted;
         ctx.font = "11px system-ui,sans-serif";
         ctx.fillText(String(err.message || err).slice(0, 100), 8, 20);
         ctx.restore();
@@ -680,6 +636,7 @@
     _drawImpl() {
       const ctx = this.ctx;
       const canvas = this.canvas;
+      const colors = canvasColors();
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.parentElement.getBoundingClientRect();
       const size = Math.min(rect.width - 8, 280);
@@ -691,7 +648,7 @@
       ctx.clearRect(0, 0, size, size);
 
       if (!this.section?.station) {
-        ctx.fillStyle = "var(--text-muted)";
+        ctx.fillStyle = colors.textMuted;
         ctx.font = "12px system-ui,sans-serif";
         ctx.fillText("Section preview…", 12, 24);
         return;
@@ -719,8 +676,8 @@
         ctx.stroke();
       };
 
-      drawCircle(rGas, "var(--border)", "rgba(80,80,90,0.15)", 1);
-      drawCircle(rInner, "var(--text-muted)", null, 1);
+      drawCircle(rGas, colors.border, "rgba(80,80,90,0.15)", 1);
+      drawCircle(rInner, colors.textMuted, null, 1);
 
       const N = Math.max(st.n_channels, 1);
       const rMid = 0.5 * (rInner + rOuter);
@@ -738,7 +695,7 @@
       const channelsFit = rOuter > rInner + 1e-9 && rOuterPx > rInnerPx + minPx;
 
       if (!channelsFit) {
-        ctx.fillStyle = "var(--warning)";
+        ctx.fillStyle = colors.warning;
         ctx.font = "10px system-ui,sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("Channel height too large for this radius", cx, cy);
@@ -751,17 +708,17 @@
           ctx.arc(cx, cy, rOuterPx, a0, a1);
           ctx.arc(cx, cy, rInnerPx, a1, a0, true);
           ctx.closePath();
-          ctx.fillStyle = "var(--accent)";
+          ctx.fillStyle = colors.accent;
           ctx.globalAlpha = 0.75;
           ctx.fill();
           ctx.globalAlpha = 1;
-          ctx.strokeStyle = "var(--accent)";
+          ctx.strokeStyle = colors.accent;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
       }
 
-      ctx.fillStyle = "var(--text-muted)";
+      ctx.fillStyle = colors.textMuted;
       ctx.font = "10px system-ui,sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(`x = ${mm(this.section.x_m)} mm`, cx, size - 8);
@@ -769,198 +726,6 @@
       ctx.fillText(`N = ${N}`, 8, 14);
       ctx.fillText(`w = ${mm(st.channel_width_m)} mm`, 8, 26);
       ctx.fillText(`h = ${mm(st.channel_height_m)} mm`, 8, 38);
-    }
-  }
-
-  /** Profile plot: contour background + editable station markers. */
-  class ProfilePlotCanvas {
-    constructor(canvas, onStationPick) {
-      this.canvas = canvas;
-      this.ctx = canvas.getContext("2d");
-      this.data = null;
-      this.activeParam = "height_m";
-      this.stationIdx = 0;
-      this.onStationPick = onStationPick || (() => {});
-      canvas.addEventListener("click", (e) => this._pick(e));
-      this._resizeObs = new ResizeObserver(() => this.draw());
-      this._resizeObs.observe(canvas.parentElement || canvas);
-    }
-
-    setData(sectionPayload, paramKey) {
-      this.data = sectionPayload;
-      if (paramKey) this.activeParam = paramKey;
-      this.draw();
-    }
-
-    setStationIdx(i) {
-      this.stationIdx = i;
-      this.draw();
-    }
-
-    _pick(e) {
-      if (!this.data?.profiles) return;
-      const rect = this.canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const xs = this.data.profiles.x_m;
-      const pad = 36;
-      const plotW = rect.width - pad * 2;
-      const xMin = Math.min(...xs);
-      const xMax = Math.max(...xs);
-      const frac = (x - pad) / plotW;
-      const xm = xMin + frac * (xMax - xMin);
-      const i = xs.reduce((best, v, j) =>
-        Math.abs(v - xm) < Math.abs(xs[best] - xm) ? j : best, 0);
-      this.stationIdx = i;
-      this.onStationPick(i, xs[i]);
-      this.draw();
-    }
-
-    draw() {
-      const ctx = this.ctx;
-      const canvas = this.canvas;
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.parentElement.getBoundingClientRect();
-      const w = rect.width - 8;
-      const h = 200;
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-
-      if (!this.data?.profiles) return;
-
-      const prof = this.data.profiles;
-      const xs = prof.x_m;
-      const ys = prof[this.activeParam] || prof.height_m;
-      const xMin = Math.min(...xs);
-      const xMax = Math.max(...xs);
-      const yMax = Math.max(...ys) * 1.15;
-      const pad = 36;
-      const plotW = w - pad * 2;
-      const plotH = h - pad * 2;
-      const toX = (x) => pad + ((x - xMin) / (xMax - xMin)) * plotW;
-      const toY = (y) => pad + plotH - (y / yMax) * plotH;
-
-      if (this.data.contour) {
-        const crs = this.data.contour.r_m;
-        const rMax = Math.max(...crs);
-        ctx.fillStyle = "rgba(100,120,160,0.12)";
-        ctx.beginPath();
-        for (let i = 0; i < xs.length; i++) {
-          const xi = toX(xs[i]);
-          const ri = (crs[Math.min(i, crs.length - 1)] / rMax) * plotH * 0.35;
-          if (i === 0) ctx.moveTo(xi, pad + plotH);
-          ctx.lineTo(xi, pad + plotH - ri);
-        }
-        ctx.lineTo(toX(xs[xs.length - 1]), pad + plotH);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      ctx.strokeStyle = "var(--accent)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let i = 0; i < xs.length; i++) {
-        const px = toX(xs[i]);
-        const py = toY(ys[i]);
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-
-      const si = Math.min(this.stationIdx, xs.length - 1);
-      const sx = toX(xs[si]);
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = "var(--warning)";
-      ctx.beginPath();
-      ctx.moveTo(sx, pad);
-      ctx.lineTo(sx, pad + plotH);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Regen breakpoint markers
-      if (this.breakpoints?.length) {
-        ctx.fillStyle = "var(--warning)";
-        for (const [bx, bv] of this.breakpoints) {
-          const px = toX(bx);
-          const py = toY(bv);
-          ctx.beginPath();
-          ctx.arc(px, py, 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = "var(--warning)";
-          ctx.beginPath();
-          ctx.moveTo(px, pad);
-          ctx.lineTo(px, pad + plotH);
-          ctx.stroke();
-        }
-      }
-    }
-  }
-
-  /** Vertical sliders at regen profile breakpoints. */
-  class ProfileBreakpointSliders {
-    constructor(container, editor, workspace) {
-      this.container = container;
-      this.editor = editor;
-      this.workspace = workspace;
-      this.paramKey = "height_m";
-    }
-
-    setParam(paramKey) {
-      this.paramKey = paramKey;
-      this.render();
-    }
-
-    render() {
-      this.container.innerHTML = "";
-      const pts = regenProfilePoints(this.editor, this.paramKey);
-      if (!pts.length || !this.editor.editable) {
-        this.container.classList.add("hidden");
-        return;
-      }
-      this.container.classList.remove("hidden");
-      const head = document.createElement("p");
-      head.className = "form-hint";
-      head.textContent = "Drag sliders to edit profile breakpoints (regen)";
-      this.container.appendChild(head);
-
-      const row = document.createElement("div");
-      row.className = "profile-breakpoints-row";
-      const vmax = Math.max(...pts.map((p) => p[1]), 0.001) * 2.5;
-
-      pts.forEach((pt, idx) => {
-        const col = document.createElement("div");
-        col.className = "profile-bp-col";
-        col.innerHTML = `<span class="profile-bp-x">x=${(pt[0] * 1000).toFixed(0)} mm</span>`;
-        const slider = document.createElement("input");
-        slider.type = "range";
-        slider.min = 0;
-        slider.max = vmax;
-        slider.step = vmax / 200;
-        slider.value = pt[1];
-        slider.orient = "vertical";
-        slider.className = "profile-bp-slider";
-        const val = document.createElement("span");
-        val.className = "profile-bp-val";
-        val.textContent = `${(pt[1] * 1000).toFixed(2)} mm`;
-        slider.addEventListener("input", () => {
-          const v = parseFloat(slider.value);
-          setRegenProfilePoint(this.editor, this.paramKey, idx, v);
-          val.textContent = `${(v * 1000).toFixed(2)} mm`;
-          this.editor.onDirty(true);
-          this.editor._notifyChange(false);
-        });
-        slider.addEventListener("change", () => {
-          this.editor._notifyChange(true);
-          this.workspace._fetchCooling();
-        });
-        col.appendChild(slider);
-        col.appendChild(val);
-        row.appendChild(col);
-      });
-      this.container.appendChild(row);
     }
   }
 
@@ -979,19 +744,27 @@
         this._drag = true;
         this._last = [e.clientX, e.clientY];
       });
-      window.addEventListener("mouseup", () => { this._drag = false; });
-      window.addEventListener("mousemove", (e) => {
+      this._onWindowUp = () => { this._drag = false; };
+      this._onWindowMove = (e) => {
         if (!this._drag) return;
         this.rotY += (e.clientX - this._last[0]) * 0.01;
         this.rotX = Math.max(-1.2, Math.min(1.2, this.rotX + (e.clientY - this._last[1]) * 0.01));
         this._last = [e.clientX, e.clientY];
         this.draw();
-      });
+      };
+      window.addEventListener("mouseup", this._onWindowUp);
+      window.addEventListener("mousemove", this._onWindowMove);
       this._resizeObs = new ResizeObserver(() => {
         const parent = this.canvas.parentElement;
         if (parent && !parent.classList.contains("hidden")) this.draw();
       });
       if (canvas.parentElement) this._resizeObs.observe(canvas.parentElement);
+    }
+
+    destroy() {
+      window.removeEventListener("mouseup", this._onWindowUp);
+      window.removeEventListener("mousemove", this._onWindowMove);
+      this._resizeObs?.disconnect();
     }
 
     _rotate(v) {
@@ -1117,12 +890,25 @@
       this._debounced3d = debounce(() => this._fetchCooling3d(), PREVIEW_DEBOUNCE_MS);
       this._debouncedThermal = debounce(() => this._fetchThermal(), 800);
       this._instances = new WeakMap();
+      this._mounted = [];
       this._loadingCounts = new WeakMap();
       this._abort = { contour: null, cooling: null, cooling3d: null, thermal: null };
       this._seq = { contour: 0, cooling: 0, cooling3d: 0, thermal: 0 };
       this._mesh3dCache = null;
       this.thermalData = null;
       this._exportChannelId = 0;
+    }
+
+    /**
+     * Destroy all viewer instances created by mount*Panel calls: removes
+     * their window listeners, disconnects ResizeObservers, and frees GL
+     * resources. Called by ConfigEditor._render before re-mounting panels.
+     */
+    destroyMounted() {
+      for (const viewer of this._mounted) {
+        viewer.destroy?.();
+      }
+      this._mounted = [];
     }
 
     _beginPreview(kind) {
@@ -1195,6 +981,7 @@
     _drawProfileSpark(canvas, data, yKey, color, label) {
       const ctx = canvas.getContext("2d");
       if (!ctx || !data?.profiles) return;
+      const colors = canvasColors();
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.parentElement?.clientWidth || 280;
       const h = 88;
@@ -1203,7 +990,7 @@
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "var(--plot-bg, #0f1014)";
+      ctx.fillStyle = colors.plotBg;
       ctx.fillRect(0, 0, w, h);
       const xs = data.profiles.x_m;
       const ys = data.profiles[yKey];
@@ -1225,7 +1012,7 @@
         else ctx.lineTo(px, py);
       }
       ctx.stroke();
-      ctx.fillStyle = "var(--text-muted, #888)";
+      ctx.fillStyle = colors.textMuted;
       ctx.font = "9px system-ui,sans-serif";
       ctx.fillText(label, pad, h - 3);
     }
@@ -1315,9 +1102,14 @@
       const { signal, seq } = this._beginPreview("contour");
       const hasData = !!this.contourData?.contour;
       const wraps = document.querySelectorAll(".workspace-preview:not(.workspace-cooling)");
+      const started = [];
       wraps.forEach((wrap) => {
-        if (!hasData) this._loadingStart(wrap, "Updating contour…");
-        else wrap.classList.add("is-stale");
+        if (!hasData) {
+          this._loadingStart(wrap, "Updating contour…");
+          started.push(wrap);
+        } else {
+          wrap.classList.add("is-stale");
+        }
       });
       try {
         const data = await postPreview("contour", cfg, {}, { signal });
@@ -1330,11 +1122,11 @@
         this.contourData = { error: e.message };
         this._refreshChamberCanvases();
       } finally {
+        // Every _loadingStart must be balanced regardless of staleness/abort,
+        // otherwise the overlay ref-count leaks and the spinner sticks.
+        started.forEach((wrap) => this._loadingEnd(wrap));
         if (!this._isStale("contour", seq)) {
-          wraps.forEach((wrap) => {
-            wrap.classList.remove("is-stale");
-            this._loadingEnd(wrap);
-          });
+          wraps.forEach((wrap) => wrap.classList.remove("is-stale"));
         }
       }
     }
@@ -1344,9 +1136,11 @@
       if (!cfg) return;
       const { signal, seq } = this._beginPreview("cooling3d");
       const wraps = wrapFilter ? [wrapFilter] : [...this._coolingWraps()];
+      const started = [];
       if (!quiet) {
         for (const wrap of wraps) {
           this._loadingStart(wrap, "Building channel 3D mesh…");
+          started.push(wrap);
         }
       }
       try {
@@ -1374,10 +1168,9 @@
           if (st) st.textContent = e.message;
         }
       } finally {
-        if (!quiet && !this._isStale("cooling3d", seq)) {
-          for (const wrap of wraps) {
-            this._loadingEnd(wrap);
-          }
+        // Balance every _loadingStart even for stale/aborted requests.
+        for (const wrap of started) {
+          this._loadingEnd(wrap);
         }
       }
     }
@@ -1387,9 +1180,14 @@
       if (!cfg) return;
       const { signal, seq } = this._beginPreview("cooling");
       const hasData = !!this.sectionData?.station;
+      const started = [];
       for (const wrap of this._coolingWraps()) {
-        if (!hasData) this._loadingStart(wrap, "Updating cross-section…");
-        else wrap.classList.add("is-stale");
+        if (!hasData) {
+          this._loadingStart(wrap, "Updating cross-section…");
+          started.push(wrap);
+        } else {
+          wrap.classList.add("is-stale");
+        }
       }
       try {
         this.sectionData = await postPreview("cooling/section", cfg, {
@@ -1404,10 +1202,13 @@
         this.sectionData = { error: e.message };
         this._refreshCoolingCanvases();
       } finally {
+        // Balance every _loadingStart even for stale/aborted requests.
+        for (const wrap of started) {
+          this._loadingEnd(wrap);
+        }
         if (!this._isStale("cooling", seq)) {
           for (const wrap of this._coolingWraps()) {
             wrap.classList.remove("is-stale");
-            this._loadingEnd(wrap);
           }
         }
       }
@@ -1441,6 +1242,7 @@
       const contour = new ContourCanvas(c2d);
       const revolve = new ContourRevolve3D(c3d);
       this._instances.set(wrap, { contour, revolve, wrap });
+      this._mounted.push(contour, revolve);
 
       mountViewportZoom(wrap.querySelector(".workspace-canvas-wrap"), () =>
         c3d.classList.contains("hidden") ? contour : revolve
@@ -1535,6 +1337,7 @@
       mountViewportZoom(wrap.querySelector(".ws-cool-section-view"), () => section);
       mountViewportZoom(wrap.querySelector(".ws-cool-3d-view"), () => mesh3d);
       this._instances.set(wrap, { section, mesh3d, wrap, editor });
+      this._mounted.push(section, mesh3d);
 
       const slider = wrap.querySelector(".ws-axial-slider");
       slider.addEventListener("input", () => {
@@ -1588,10 +1391,6 @@
       return wrap;
     }
 
-    mountCoolingPanel(container, editor) {
-      return this.mountRegenDesignPanel(container, editor);
-    }
-
     _refreshChamberCanvases() {
       document.querySelectorAll(".workspace-preview").forEach((wrap) => {
         const inst = this._instances.get(wrap);
@@ -1614,62 +1413,6 @@
       document.querySelectorAll(".workspace-cooling").forEach((wrap) => {
         this._applySectionToWrap(wrap);
       });
-    }
-
-    _regenProfilePath(paramKey) {
-      const map = {
-        height_m: ["regen", "channels", "height"],
-        rib_width_m: ["regen", "channels", "rib", "width"],
-        wall_thickness_m: ["regen", "channels", "inner_wall_thickness"],
-      };
-      return map[paramKey];
-    }
-
-    _setRegenProfileValue(editor, paramKey, stationIdx, value) {
-      const path = this._regenProfilePath(paramKey);
-      if (!path) return;
-      let obj = editor.config;
-      for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
-      const key = path[path.length - 1];
-      let prof = obj[key];
-      const xs = this.sectionData?.profiles?.x_m;
-      if (!xs) return;
-      const x = xs[stationIdx];
-      if (!Array.isArray(prof)) {
-        prof = [[xs[0], prof], [xs[xs.length - 1], prof]];
-        obj[key] = prof;
-      }
-      let found = false;
-      for (const pt of prof) {
-        if (Math.abs(pt[0] - x) < 1e-9) {
-          pt[1] = value;
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        prof.push([x, value]);
-        prof.sort((a, b) => a[0] - b[0]);
-      }
-    }
-
-    _syncProfileValueSlider(wrap, editor, stationIdx) {
-      const row = wrap.querySelector(".ws-profile-value-row");
-      const slider = wrap.querySelector(".ws-profile-value");
-      const lbl = wrap.querySelector(".ws-profile-value-label");
-      if (!this.sectionData?.has_regen || !editor.editable) {
-        row.classList.add("hidden");
-        return;
-      }
-      row.classList.remove("hidden");
-      const param = wrap.querySelector(".ws-profile-param").value;
-      const ys = this.sectionData.profiles[param];
-      const v = ys?.[stationIdx] ?? 0.001;
-      slider.min = 0;
-      slider.max = Math.max(v * 3, 0.006);
-      slider.step = 0.0001;
-      slider.value = v;
-      lbl.textContent = (v * 1000).toFixed(2) + " mm";
     }
 
     _applySectionToWrap(wrap) {
@@ -1723,4 +1466,5 @@
 
   window.DesignWorkspace = DesignWorkspace;
   window.postPreview = postPreview;
+  window.StudioCanvas = { canvasColors };
 })();

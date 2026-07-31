@@ -37,7 +37,6 @@ class ChannelLayout:
         # contour quantities ------------------------------------------------
         self.r = contour.r(self.x)
         self.drdx = contour.drdx(self.x)
-        self.phi_wall = np.arctan(self.drdx)              # meridian slope
         dsdx = np.sqrt(1.0 + self.drdx ** 2)
         self.ds = np.gradient(self.x) * dsdx              # meridian per stat.
         self.s = np.concatenate(([0.0], np.cumsum(

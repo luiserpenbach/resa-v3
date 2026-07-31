@@ -8,8 +8,7 @@ import numpy as np
 
 from ..results import ContourResult, EnvelopeResult
 
-_STYLE = dict(figsize=(7.0, 4.0), dpi=150)
-_FONT = dict(labelsize=9, titlesize=10)
+_STYLE = dict(figsize=(7.0, 4.0))
 
 
 def _setup():
@@ -117,8 +116,10 @@ def envelope_figure(e: EnvelopeResult, nominal=None) -> bytes:
     z[e.separated] = np.nan
     throttle_pct = e.throttle_frac * 100
     extent = [throttle_pct[0], throttle_pct[-1], e.of[0], e.of[-1]]
+    # z is (n_of, n_t): rows = O/F = y with origin="lower", so no transpose —
+    # same orientation as the pc_bar contour overlay below.
     im = ax.imshow(
-        z.T, origin="lower", aspect="auto", extent=extent, cmap="viridis",
+        z, origin="lower", aspect="auto", extent=extent, cmap="viridis",
     )
     ax.contour(
         throttle_pct, e.of, e.pc_bar, colors="white", linewidths=0.6, alpha=0.7,

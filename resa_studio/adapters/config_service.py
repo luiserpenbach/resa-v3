@@ -19,7 +19,7 @@ from resa.config.loader import (
 )
 from resa.config.schema import EngineConfig
 
-from ..settings import CONFIGS_ROOT, PROJECTS_ROOT, REPO_ROOT
+from ..settings import CONFIGS_ROOT, OUT_ROOT, PROJECTS_ROOT, REPO_ROOT, rel_to
 
 
 def _config_hash(data: dict[str, Any]) -> str:
@@ -90,13 +90,13 @@ def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     inherited = load_inherited_dict(path)
     overlay = _diff_overlay(inherited, clean) or {}
 
-    # Preserve relative base path and explicit nulls (e.g. operating_point: null).
+    # Preserve the relative base path, and explicit nulls (e.g.
+    # operating_point: null) only while the edited config still has no value
+    # there — a user edit to a nulled key must win over the null on disk.
     overlay["base"] = base_ref
     for key, val in raw_on_disk.items():
-        if val is None:
+        if val is None and clean.get(key) is None:
             overlay[key] = None
-
-    _preserve_file_refs(path, overlay, clean, raw_on_disk)
 
     # Drop inherited-equal branches (except base and explicit nulls).
     for key in list(overlay):
@@ -107,6 +107,10 @@ def _build_save_payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
             continue
         if _deep_equal(clean.get(key), inherited.get(key)):
             del overlay[key]
+
+    # Restore fragment refs after the drop above, so a ref pin whose content
+    # happens to equal the inherited value is kept rather than deleted.
+    _preserve_file_refs(path, overlay, clean, raw_on_disk)
 
     if len(overlay) == 1 and "base" in overlay:
         # Only base left — keep any keys that were in the original thin file.
@@ -123,9 +127,13 @@ class ConfigService:
         self,
         repo_root: Path | None = None,
         configs_root: Path | None = None,
+        projects_root: Path | None = None,
+        out_root: Path | None = None,
     ) -> None:
         self.repo_root = (repo_root or REPO_ROOT).resolve()
         self.configs_root = (configs_root or CONFIGS_ROOT).resolve()
+        self.projects_root = (projects_root or PROJECTS_ROOT).resolve()
+        self.out_root = (out_root or OUT_ROOT).resolve()
 
     def _resolve_path(self, config_path: str | Path) -> Path:
         path = Path(config_path)
@@ -133,20 +141,26 @@ class ConfigService:
             path = (self.repo_root / path).resolve()
         else:
             path = path.resolve()
-        if not str(path).startswith(str(self.repo_root)):
+        # Confine to the known roots (proper ancestor check, not a string
+        # prefix that a sibling directory could satisfy). configs/projects/out
+        # roots may be relocated outside the repo via RESA_*_ROOT.
+        allowed = (self.repo_root, self.configs_root, self.projects_root,
+                   self.out_root)
+        if not any(path.is_relative_to(root) for root in allowed):
             raise ValueError(f"config path must stay under project root: {path}")
         if not path.is_file():
             raise FileNotFoundError(f"config not found: {path}")
         return path
 
     def _rel(self, path: Path) -> str:
-        return path.relative_to(self.repo_root).as_posix()
+        return rel_to(path, self.repo_root)
 
     def _path_info(self, path: Path) -> dict[str, Any]:
         rel = self._rel(path)
-        writable = rel.startswith("configs/projects/") or (
-            rel.startswith("out/") and path.name == "config_resolved.yaml"
-        )
+        # Run snapshots (out/**/config_resolved.yaml) are read-only: save_config
+        # only accepts project configs, so advertising them as writable
+        # produced an Edit flow whose Save always failed.
+        writable = path.is_relative_to(self.projects_root)
         return {
             "writable": writable,
             "save_path": rel,
@@ -184,8 +198,8 @@ class ConfigService:
         """Validate and write config to the file being edited."""
         source = self._resolve_path(config_path)
         rel = self._rel(source)
-        if not rel.startswith("configs/projects/"):
-            raise ValueError(f"config must live under configs/projects/: {rel}")
+        if not source.is_relative_to(self.projects_root):
+            raise ValueError(f"config must live under the projects root: {rel}")
         info = self._path_info(source)
         if not info["writable"]:
             raise ValueError(f"config path is not writable: {self._rel(source)}")

@@ -95,6 +95,15 @@ const els = {
   btnRefreshRuns: document.getElementById("btn-refresh-runs"),
 };
 
+/** Escape a dynamic value before interpolating it into innerHTML. */
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function getTheme() {
   return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
 }
@@ -151,11 +160,21 @@ function parseValidationErrors(data) {
 }
 
 async function validateConfigApi(config) {
-  const res = await fetch("/api/config/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ config }),
-  });
+  let res;
+  try {
+    res = await fetch("/api/config/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config }),
+    });
+  } catch (err) {
+    // Network failure — report as a validation state instead of throwing.
+    return {
+      ok: false,
+      errors: [],
+      message: `Network error: ${err?.message || err}`,
+    };
+  }
   const data = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true, data };
   return {
@@ -304,10 +323,9 @@ function updateEditUI() {
     }
   }
   if (els.editHint) {
-    if (sess?.editing && sess.isRun) {
-      els.editHint.textContent = "Save updates the run snapshot (config_resolved.yaml).";
-      els.editHint.classList.remove("hidden");
-    } else if (sess?.editing) {
+    // Run snapshots (out/**/config_resolved.yaml) report writable: false, so
+    // editing is never entered for them — the editor stays read-only.
+    if (sess?.editing) {
       els.editHint.textContent = `Changes will be saved to ${sess.savePath}.`;
       els.editHint.classList.remove("hidden");
     } else {
@@ -342,7 +360,8 @@ function cancelEdit() {
   sess.editing = false;
   sess.dirty = false;
   updateEditUI();
-  validateEditorConfig(state.editor.getConfig(), { silent: true });
+  validateEditorConfig(state.editor.getConfig(), { silent: true })
+    .catch((err) => console.error("Validation after cancel failed:", err));
   clearResults();
   setStatus("Changes reverted.");
 }
@@ -500,8 +519,8 @@ function renderSummary(summary, provenance) {
     const src = srcKey && summary[srcKey] ? summary[srcKey] : provenance[key.replace("_src", "")] || "";
     card.innerHTML = `
       <div class="kpi-label">${label}</div>
-      <div class="kpi-value">${value}${unitStr}</div>
-      ${src ? `<div class="kpi-src">${src}</div>` : ""}
+      <div class="kpi-value">${esc(value)}${unitStr}</div>
+      ${src ? `<div class="kpi-src">${esc(src)}</div>` : ""}
     `;
     els.kpis.appendChild(card);
   }
@@ -509,7 +528,7 @@ function renderSummary(summary, provenance) {
   els.provenanceBody.innerHTML = "";
   for (const [qty, src] of Object.entries(provenance || {})) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td>${qty}</td><td>${src}</td>`;
+    row.innerHTML = `<td>${esc(qty)}</td><td>${esc(src)}</td>`;
     els.provenanceBody.appendChild(row);
   }
 }
@@ -523,7 +542,7 @@ function renderWarnings(warnings) {
   els.warnings.classList.remove("hidden");
   els.warnings.innerHTML = `
     <strong>Warnings (${warnings.length})</strong>
-    <ul>${warnings.map((w) => `<li>${w}</li>`).join("")}</ul>
+    <ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
   `;
 }
 
@@ -627,7 +646,11 @@ function renderRun(data) {
     }
   }
 
-  if (data.engine && data.config_hash && data.artifacts) {
+  // Fast runs have no artifacts folder on disk — they must not set
+  // state.activeRun (there is no run folder to highlight in the sidebar)
+  // and keep plotSource = "live". `data.artifacts` is always a list
+  // (possibly empty), so mode must be checked first.
+  if (data.mode !== "fast" && data.engine && data.config_hash && data.artifacts) {
     state.activeRun = { engine: data.engine, config_hash: data.config_hash };
     state.plotSource = "saved";
     renderPlots(data.engine, data.config_hash, data.artifacts);
@@ -672,7 +695,7 @@ async function loadRuns() {
       const pick =
         state.compareA === key ? " [A]" : state.compareB === key ? " [B]" : "";
       btn.innerHTML = `
-        <div class="run-title">${run.engine}${pick}</div>
+        <div class="run-title">${esc(run.engine)}${pick}</div>
         <div class="run-meta">${kpis}${kpis ? " · " : ""}${formatRunTime(run.modified_at)}</div>
       `;
       btn.addEventListener("click", (e) => {
@@ -687,7 +710,7 @@ async function loadRuns() {
     highlightActiveRun();
     syncCompareSelects();
   } catch (err) {
-    els.runsList.innerHTML = `<p class="placeholder" style="color:var(--danger)">${err.message}</p>`;
+    els.runsList.innerHTML = `<p class="placeholder" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
 }
 
@@ -695,16 +718,32 @@ function runKey(engine, hash) {
   return `${engine}|${hash}`;
 }
 
+/** Cheaply refresh the [A]/[B] compare tags on already-rendered run buttons. */
+function refreshCompareTags() {
+  for (const btn of els.runsList.querySelectorAll(".nav-item-run")) {
+    const key = runKey(btn.dataset.engine, btn.dataset.hash);
+    const pick = state.compareA === key ? " [A]" : state.compareB === key ? " [B]" : "";
+    const title = btn.querySelector(".run-title");
+    if (title) title.textContent = `${btn.dataset.engine}${pick}`;
+  }
+}
+
 function pickCompareRun(engine, hash) {
   const key = runKey(engine, hash);
-  if (!state.compareA) state.compareA = key;
-  else if (!state.compareB || state.compareB === key) state.compareB = key;
-  else {
+  if (!state.compareA) {
+    state.compareA = key;
+  } else if (key === state.compareA || key === state.compareB) {
+    // Ignore a shift-click that would duplicate a selection (B === A) or
+    // toggle an existing pick off.
+    return;
+  } else if (!state.compareB) {
+    state.compareB = key;
+  } else {
     state.compareA = key;
     state.compareB = null;
   }
   syncCompareSelects();
-  loadRuns();
+  refreshCompareTags();
   setStatus(`Compare: A=${state.compareA || "—"} B=${state.compareB || "—"}`);
 }
 
@@ -717,7 +756,7 @@ function syncCompareSelects() {
   for (const sel of [els.compareRunA, els.compareRunB]) {
     const cur = sel.value;
     sel.innerHTML = '<option value="">—</option>' +
-      opts.map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
+      opts.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
     if (cur && opts.some((o) => o.value === cur)) sel.value = cur;
   }
   if (state.compareA) els.compareRunA.value = state.compareA;
@@ -762,14 +801,14 @@ function renderCompareResults(data) {
   els.compareResults.classList.remove("hidden");
   const warnHtml = [
     data.warnings_new?.length
-      ? `<p class="compare-warn-new"><strong>New warnings:</strong> ${data.warnings_new.join("; ")}</p>`
+      ? `<p class="compare-warn-new"><strong>New warnings:</strong> ${esc(data.warnings_new.join("; "))}</p>`
       : "",
     data.warnings_resolved?.length
-      ? `<p class="compare-warn-resolved"><strong>Resolved:</strong> ${data.warnings_resolved.join("; ")}</p>`
+      ? `<p class="compare-warn-resolved"><strong>Resolved:</strong> ${esc(data.warnings_resolved.join("; "))}</p>`
       : "",
   ].join("");
   els.compareResultsBody.innerHTML = `
-    <p class="form-hint">${data.a?.outdir || "A"} vs ${data.b?.outdir || "B"}</p>
+    <p class="form-hint">${esc(data.a?.outdir || "A")} vs ${esc(data.b?.outdir || "B")}</p>
     ${warnHtml}
     <h4 class="compare-subhead">Result deltas</h4>
     ${window.StudioP2 ? StudioP2.renderDiffTable(data.result_diff) : ""}
@@ -794,8 +833,8 @@ async function loadCampaigns() {
       const row = document.createElement("div");
       row.className = "campaign-row";
       row.innerHTML = `
-        <div class="campaign-name">${c.name}</div>
-        <div class="campaign-meta">${c.n_configs} configs</div>
+        <div class="campaign-name">${esc(c.name)}</div>
+        <div class="campaign-meta">${esc(c.n_configs)} configs</div>
       `;
       const btn = document.createElement("button");
       btn.type = "button";
@@ -807,7 +846,7 @@ async function loadCampaigns() {
       els.campaignsList.appendChild(row);
     }
   } catch (err) {
-    els.campaignsList.innerHTML = `<p class="placeholder" style="color:var(--danger)">${err.message}</p>`;
+    els.campaignsList.innerHTML = `<p class="placeholder" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
 }
 
@@ -910,7 +949,7 @@ function renderProjectNav(projects) {
     summary.innerHTML = `
       <span class="nav-chevron" aria-hidden="true"></span>
       <span class="nav-project-label">
-        <span class="nav-project-name">${project.name}</span>
+        <span class="nav-project-name">${esc(project.name)}</span>
         <span class="nav-project-meta">${project.configs.length} cfg</span>
       </span>
     `;
@@ -946,8 +985,8 @@ function renderProjectNav(projects) {
       btn.dataset.config = item.path;
       const label = item.filename?.replace(/\.ya?ml$/i, "") || item.name;
       btn.innerHTML = item.is_primary
-        ? `<span class="cfg-name">${label}</span><span class="cfg-badge">primary</span>`
-        : `<span class="cfg-name">${label}</span>`;
+        ? `<span class="cfg-name">${esc(label)}</span><span class="cfg-badge">primary</span>`
+        : `<span class="cfg-name">${esc(label)}</span>`;
       btn.title = item.path;
       btn.addEventListener("click", () => selectConfig(item.path));
       const pin = document.createElement("button");
@@ -1053,10 +1092,6 @@ async function submitNewConfig(e) {
   }
 }
 
-function renderConfigNav(configs) {
-  renderProjectNav(state.projects);
-}
-
 async function loadEditorConfig() {
   const path = state.activeConfig || els.configPath.value;
   if (!path || !state.editor) return;
@@ -1084,11 +1119,6 @@ async function loadEditorConfig() {
   } catch (err) {
     if (loadId !== state.loadSeq) return;
     const msg = String(err.message);
-    if (msg.includes("Not Found") && msg.includes("resolve")) {
-      state.editor.setValidation(false, "Restart server");
-      setStatus("Restart Studio: python -m resa_studio", true);
-      return;
-    }
     if (state.editor?.showLoadError) {
       state.editor.showLoadError(path, msg);
     } else {
@@ -1253,7 +1283,8 @@ els.btnTheme?.addEventListener("click", toggleTheme);
     state.editor = new ConfigEditor(els.configEditor, {
       onChange: (config) => {
         if (state.editSession?.editing) {
-          validateEditorConfig(config, { silent: true, autoRun: true });
+          validateEditorConfig(config, { silent: true, autoRun: true })
+            .catch((err) => console.error("Live validation failed:", err));
         }
       },
       onDirty: (dirty) => markDirty(dirty),

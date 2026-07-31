@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from ..settings import PROJECTS_ROOT, REPO_ROOT
+from ..settings import PROJECTS_ROOT, REPO_ROOT, rel_to
 
 _SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 _RESERVED_CONFIG_NAMES = frozenset({"project.yaml", "project.yml"})
@@ -32,7 +32,7 @@ def _slugify(name: str) -> str:
 
 
 def _rel(path: Path, repo_root: Path) -> str:
-    return path.relative_to(repo_root).as_posix()
+    return rel_to(path, repo_root)
 
 
 def _read_project_meta(project_dir: Path) -> dict[str, Any]:

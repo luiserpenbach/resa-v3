@@ -1,67 +1,39 @@
-engine: E2-1A
-propellants:
-  name: N2O/Ethanol
-  oxidizer: NitrousOxide
-  fuel: Ethanol
-  ox_temp_K: 285
-  fuel_temp_K: 293.15
-  cea_oxidizer: N2O
-  cea_fuel: C2H5OH
-chamber:
-  contraction_ratio: 12
-  l_star_m: 1.2
-  contour: rao_bell
-  conv_half_angle_deg: 40
-  bartz_correction: 0.8
-  n_stations: 50
-cooling:
-  coolant: N2O
-  n_channels: 50
-  channel_width_m: 0.001
-  channel_height_m: 0.0005
-  rib_width_m: 0.0005
-  inner_wall_thickness_m: 0.0005
-  wall_material: IN718
-  inlet_T_K: 285
-  inlet_p_bar: 25
-  correlation: gnielinski
+# ===== E2-1A baseline engine (DESIGN mode, regen circuit 1) =====
+engine: "E2-1A"
+description: "Hopper E2 - Initial regenerative engine analysis"
+propellants: prop_n2o_ethanol.yaml
+chamber: chamber_E2_TC_01.yaml
+cooling: cooling_none.yaml
+
 combustion:
-  backend: rocketcea
+  backend: "rocketcea"
+
 operating_point:
   thrust_N: 2200
-  pc_bar: 25
-  of_ratio: 4
+  pc_bar: 25.0
+  of_ratio: 4.0
   eta_cstar: 0.93
   eta_cstar_tol: 0.03
   eta_cf: 0.97
   p_amb_bar: 1.01325
+
 offdesign:
   ox_throttle:
-    ox_fraction:
-    - 0.4
-    - 1.1
+    ox_fraction: [0.4, 1.1]
     n: 27
   of_sweep:
-    of_range:
-    - 1.5
-    - 6
+    of_range: [1.5, 6.0]
     n: 36
   envelope:
-    throttle_fraction:
-    - 0.4
-    - 1.1
-    of_range:
-    - 1.5
-    - 6
-    n:
-    - 22
-    - 22
-description: Hopper E2 - Initial regenerative engine analysis
+    throttle_fraction: [0.4, 1.1]
+    of_range: [1.5, 6.0]
+    n: [22, 22]
+
 regen:
   meta:
     name: E2-1A_regen
     description: Circuit 1
-    version: '0.1'
+    version: "0.1"
   contour:
     type: from_engine
   sync:

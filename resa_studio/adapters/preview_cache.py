@@ -1,4 +1,4 @@
-"""In-process LRU cache for expensive pipeline runs used by live previews."""
+"""In-process TTL cache (oldest-entry eviction) for live-preview pipeline runs."""
 from __future__ import annotations
 
 import hashlib
@@ -40,38 +40,34 @@ class PipelinePreviewCache:
 
     def get_or_run(self, data: dict[str, Any], validate) -> tuple[EngineConfig, Any]:
         key = self.config_key(data)
-        now = time.monotonic()
-        with self._lock:
-            fresh = self._get_fresh(key, now)
-            if fresh is not None:
-                self.hits += 1
-                cfg, result = fresh
-                return cfg, result
-            if key in self._inflight:
-                event = self._inflight[key]
-                leader = False
-            else:
-                event = Event()
-                self._inflight[key] = event
-                leader = True
-
-        if not leader:
-            event.wait(timeout=300.0)
+        while True:
             with self._lock:
                 fresh = self._get_fresh(key, time.monotonic())
                 if fresh is not None:
                     self.hits += 1
                     return fresh
-            # Leader failed or entry expired — fall through as new leader.
+                event = self._inflight.get(key)
+                if event is None:
+                    # We are the leader for this key.
+                    event = Event()
+                    self._inflight[key] = event
+                    break
+            # Follower: wait for the leader, then re-contend — exactly one
+            # waker becomes the new leader if the entry is missing (leader
+            # failed), instead of every waiter re-running the pipeline.
+            if not event.wait(timeout=300.0):
+                with self._lock:
+                    # Leader looks stuck; clear its slot (identity-checked so
+                    # a finished leader's cleanup is never clobbered) and
+                    # re-contend for leadership.
+                    if self._inflight.get(key) is event:
+                        del self._inflight[key]
 
         try:
             cfg = validate(data)
             result = pipeline_run(cfg)
         except Exception:
-            with self._lock:
-                inflight = self._inflight.pop(key, None)
-            if inflight is not None:
-                inflight.set()
+            self._release(key, event)
             raise
 
         with self._lock:
@@ -79,11 +75,18 @@ class PipelinePreviewCache:
             if len(self._entries) >= self._max_entries:
                 oldest_key = min(self._entries.items(), key=lambda item: item[1][0])[0]
                 del self._entries[oldest_key]
-            self._entries[key] = (now, cfg, result)
-            inflight = self._inflight.pop(key, None)
-        if inflight is not None:
-            inflight.set()
+            # Timestamp at store time: an entry produced by a pipeline slower
+            # than the TTL must still be fresh for the waiters it unblocks.
+            self._entries[key] = (time.monotonic(), cfg, result)
+        self._release(key, event)
         return cfg, result
+
+    def _release(self, key: str, event: Event) -> None:
+        """Drop our in-flight slot (identity-checked) and wake waiters."""
+        with self._lock:
+            if self._inflight.get(key) is event:
+                del self._inflight[key]
+        event.set()
 
     def stats(self) -> dict[str, Any]:
         with self._lock:

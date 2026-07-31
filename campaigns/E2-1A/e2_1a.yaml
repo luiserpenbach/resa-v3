@@ -1,4 +1,4 @@
-# E2-1A campaign — design + as-built + HF001 (no regen)
+# E2-1A campaign — design + as-built + HF001 (regen circuit 1 enabled)
 name: e2_1a
 output: e2_1a_output
 rollup: true

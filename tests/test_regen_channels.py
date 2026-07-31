@@ -121,9 +121,32 @@ def test_solver_smoke_energy_closure():
     x_peak = df.x_m[df.q_w_W_m2.idxmax()]
     assert abs(x_peak - lay.x_throat) < 0.02
     a = df.attrs
-    assert abs(a["energy_balance_kW"]) < 1e-6
+    # hot-side vs coolant-side heat over the wall solve (independent sides
+    # of the per-cell balance, not the tautological mdot*dh - Q identity)
+    assert abs(a["energy_balance_kW"]) < 0.005 * a["Q_total_kW"]
     assert abs(a["dh_kJ_kg"] * 1e3 * sol.mdot_ch - df.Q_cell_W.sum()) / df.Q_cell_W.sum() < 0.02
     assert df.attrs["outlet_p_bar"] < 60.0
+
+
+def test_standalone_mdot_honors_coolant_side():
+    """mdot_from_engine must use the fuel fraction for fuel-side coolants."""
+    from resa.regen_channels.solver import RegenSolver
+
+    base = {"solver": {
+        "enabled": True, "coolant": "NitrousOxide",
+        "mdot_from_engine": True, "of_ratio": 4.0,
+        "inlet": {"pressure_bar": 60.0, "temperature_K": 278.0,
+                  "location": "nozzle_end"}}}
+    cfg_ox, lay = make(base)
+    sol_ox = RegenSolver(lay, cfg_ox)
+
+    fuel = {**base, "solver": {**base["solver"], "coolant_side": "fuel"}}
+    cfg_fuel, lay2 = make(fuel)
+    sol_fuel = RegenSolver(lay2, cfg_fuel)
+
+    mdot_engine = sol_ox.hot.mdot
+    assert sol_ox.mdot_total == pytest.approx(mdot_engine * 4.0 / 5.0)
+    assert sol_fuel.mdot_total == pytest.approx(mdot_engine * 1.0 / 5.0)
 
 
 def test_figure_coolant_path_smoke():

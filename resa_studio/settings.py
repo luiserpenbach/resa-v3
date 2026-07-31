@@ -32,3 +32,17 @@ OUT_ROOT = Path(os.environ.get("RESA_OUT_ROOT", REPO_ROOT / "out")).resolve()
 CONFIGS_ROOT = Path(os.environ.get("RESA_CONFIGS_ROOT", REPO_ROOT / "configs")).resolve()
 PROJECTS_ROOT = Path(os.environ.get("RESA_PROJECTS_ROOT", CONFIGS_ROOT / "projects")).resolve()
 FRONTEND_DIR = REPO_ROOT / "frontend" / "public"
+
+
+def rel_to(path: Path | str, root: Path) -> str:
+    """*root*-relative POSIX path when possible, else absolute POSIX.
+
+    API path identifiers stay repo-relative for the default in-repo layout,
+    but a RESA_OUT_ROOT / RESA_PROJECTS_ROOT relocated outside the repo must
+    not crash the endpoints — those identifiers round-trip as absolute paths.
+    """
+    p = Path(path)
+    try:
+        return p.relative_to(root).as_posix()
+    except ValueError:
+        return p.resolve().as_posix()

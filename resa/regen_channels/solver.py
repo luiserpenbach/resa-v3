@@ -51,9 +51,12 @@ class RegenSolver:
         if self.cfg.mdot_total is not None:
             self.mdot_total = self.cfg.mdot_total
         elif self.cfg.mdot_from_engine:
-            frac = (self.cfg.coolant_fraction
-                    if self.cfg.coolant_fraction is not None
-                    else self.cfg.of_ratio / (1.0 + self.cfg.of_ratio))
+            if self.cfg.coolant_fraction is not None:
+                frac = self.cfg.coolant_fraction
+            elif self.cfg.coolant_side == "fuel":
+                frac = 1.0 / (1.0 + self.cfg.of_ratio)
+            else:
+                frac = self.cfg.of_ratio / (1.0 + self.cfg.of_ratio)
             self.mdot_total = self.hot.mdot * frac
         else:
             raise ValueError("Set solver.mdot_total or mdot_from_engine")
@@ -88,12 +91,12 @@ class RegenSolver:
                 log.debug("Jackson supercritical HTC skipped: %s", exc)
             h_conv = Nu * st.k / Dh
             if self.cfg.curvature_enhancement:
-                h_conv *= co.curvature_htc_factor(Re, d_over_D)
+                h_conv *= co.curvature_htc_factor(d_over_D)
             return h_conv, Re, f, regime
 
         h_conv = Nu * st.k / Dh
         if self.cfg.curvature_enhancement:
-            h_conv *= co.curvature_htc_factor(Re, d_over_D)
+            h_conv *= co.curvature_htc_factor(d_over_D)
 
         if not np.isnan(st.T_sat) and T_wc > st.T_sat + 0.05:
             # subcooled / saturated nucleate boiling: Chen superposition,
@@ -132,7 +135,9 @@ class RegenSolver:
             G = self.mdot_ch / lay.A[j]
             v = G / st.rho
             Dh = lay.Dh[j]
-            dD = Dh / lay.R_curve[j] if np.isfinite(lay.R_curve[j]) else 0.0
+            # correlations expect d / D_coil with D_coil = 2 * R_curve
+            dD = (Dh / (2.0 * lay.R_curve[j])
+                  if np.isfinite(lay.R_curve[j]) else 0.0)
             rel_rough = self.cfg.roughness / Dh
 
             def a_cool(hc):
@@ -150,7 +155,8 @@ class RegenSolver:
 
             lo, hi = st.T + 0.5, T_aw[j] - 0.5
             try:
-                T_wh = brentq(residual, lo, hi, xtol=0.05, maxiter=200)
+                T_wh = brentq(residual, lo, hi, xtol=0.05,
+                              maxiter=self.cfg.max_iter_wall)
             except ValueError:
                 T_wh = hi if residual(hi) > 0 else lo
 
@@ -159,6 +165,9 @@ class RegenSolver:
             T_wc = T_wh - q2 * lay.t_wall[j] / self.k_wall(T_wh)
             hc, Re, f, regime = self._h_c(st, T_wc, G, Dh, dD, rel_rough)
             Q = q2 * lay.dA_hot[j]
+            # coolant-side heat for the same cell — the wall-solve residual;
+            # differs from Q by the brentq tolerance / bracket fallbacks
+            Q_cold = hc * a_cool(hc) * (T_wc - st.T)
 
             dp_fric = f * lay.dl[j] / Dh * 0.5 * st.rho * v * v
             h_new = h + Q / self.mdot_ch
@@ -178,21 +187,25 @@ class RegenSolver:
                 p_cool_out_bar=p_new / 1e5, h_J_kg=h, h_out_J_kg=h_new,
                 rho=st.rho, rho_out=st_out.rho, v_m_s=v, quality=st.quality,
                 T_sat_K=st.T_sat, dp_cell_bar=(dp_fric + dp_acc) / 1e5,
-                Q_cell_W=Q,
+                Q_cell_W=Q, Q_cold_cell_W=Q_cold,
             ))
             p, h = p_new, h_new
 
         df = pd.DataFrame(rows).sort_values("x_m").reset_index(drop=True)
         q_kw = float(df.Q_cell_W.sum()) * lay.N / 1e3
+        q_cold_kw = float(df.Q_cold_cell_W.sum()) * lay.N / 1e3
         st_final = cool.state_ph(p, h)
         dh = h - h_in
+        # Closure = hot-side vs coolant-side heat over the wall solve. The
+        # marching Δh equals ΣQ_hot/mdot by construction, so comparing those
+        # two would always be exactly zero and could never flag a problem.
         df.attrs.update(
             mdot_total=self.mdot_total, mdot_channel=self.mdot_ch,
             saturation_reached=warn_sat, outlet_p_bar=p / 1e5,
             outlet_T_K=st_final.T, inlet_T_K=self.cfg.inlet.temperature_K,
             inlet_h_kJ_kg=h_in / 1e3, outlet_h_kJ_kg=h / 1e3,
-            dh_kJ_kg=dh / 1e3, Q_total_kW=q_kw,
-            energy_balance_kW=self.mdot_total * dh / 1e3 - q_kw,
+            dh_kJ_kg=dh / 1e3, Q_total_kW=q_kw, Q_total_cold_kW=q_cold_kw,
+            energy_balance_kW=q_kw - q_cold_kw,
             mdot_engine=self.hot.mdot,
             coolant_inlet_location=self.cfg.inlet.location,
         )

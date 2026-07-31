@@ -27,7 +27,7 @@ def ito_curvature_friction(f_straight: float, Re: float, d_over_D: float):
     return f_straight * (arg ** 0.05)
 
 
-def curvature_htc_factor(Re: float, d_over_D: float) -> float:
+def curvature_htc_factor(d_over_D: float) -> float:
     """Schmidt-type heat transfer enhancement in helical passages."""
     if d_over_D <= 0:
         return 1.0
