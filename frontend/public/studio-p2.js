@@ -2,16 +2,31 @@
  * P2 studio features — sweep charts, regen KPIs, session helpers.
  */
 (function () {
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** Canvas 2D can't parse "var(--x)" — resolve theme colors per draw. */
+  function chartColors() {
+    if (window.StudioCanvas?.canvasColors) return window.StudioCanvas.canvasColors();
+    return { bg: "#0f1014", textMuted: "#8b949e" };
+  }
+
   function drawLineChart(canvas, xs, ys, { stroke = "#5b8def", label = "" } = {}) {
     const ctx = canvas.getContext("2d");
     if (!ctx || !xs?.length || !ys?.length) return;
+    const colors = chartColors();
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth || 280;
     const h = parseInt(canvas.getAttribute("height"), 10) || 100;
     canvas.width = w * dpr;
     canvas.height = h * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "var(--bg, #0f1014)";
+    ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, w, h);
 
     const pad = { l: 36, r: 8, t: 10, b: 22 };
@@ -43,7 +58,7 @@
     }
     ctx.stroke();
 
-    ctx.fillStyle = "var(--text-muted, #8b949e)";
+    ctx.fillStyle = colors.textMuted;
     ctx.font = "9px system-ui,sans-serif";
     ctx.fillText(label, pad.l, h - 6);
     ctx.textAlign = "right";
@@ -88,11 +103,18 @@
     }
     if (offdesign.envelope?.thrust_N) {
       const s = offdesign.envelope;
+      // Envelope thrust_N is a 2-D grid (rows = O/F, cols = throttle).
+      // drawLineChart is 1-D, so chart the middle O/F row — the "(1D slice)"
+      // in the title — against the throttle axis.
+      const grid2d = Array.isArray(s.thrust_N[0]);
+      const thrustSlice = grid2d
+        ? s.thrust_N[Math.floor(s.thrust_N.length / 2)]
+        : s.thrust_N;
       grid.appendChild(renderSweepBlock(
         "Envelope · thrust (1D slice)",
         "sweep-env",
         s.throttle_frac || s.of,
-        s.thrust_N,
+        thrustSlice,
         s.throttle_frac ? "throttle" : "O/F",
         "N"
       ));
@@ -123,7 +145,7 @@
       card.className = "kpi kpi-regen";
       card.innerHTML = `
         <div class="kpi-label">${label}</div>
-        <div class="kpi-value">${val} ${unit}</div>
+        <div class="kpi-value">${esc(val)} ${unit}</div>
         <div class="kpi-src">regen solver</div>
       `;
       kpiContainer.appendChild(card);
@@ -182,7 +204,7 @@
     }
     const head = "<tr><th>Key</th><th>A</th><th>B</th><th>Δ</th></tr>";
     const body = rows.map((r) =>
-      `<tr><td>${r.key}</td><td>${r.a}</td><td>${r.b}</td><td>${r.delta || "—"}</td></tr>`
+      `<tr><td>${esc(r.key)}</td><td>${esc(r.a)}</td><td>${esc(r.b)}</td><td>${esc(r.delta || "—")}</td></tr>`
     ).join("");
     return `<table class="diff-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
   }

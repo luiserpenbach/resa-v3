@@ -102,9 +102,9 @@
     propellants: ["propellants"],
     combustion: ["combustion"],
     chamber: ["chamber"],
-    cooling: ["cooling"],
+    // regen is edited on the cooling tab (see SECTIONS) — there is no "regen" tab.
+    cooling: ["cooling", "regen"],
     offdesign: ["offdesign"],
-    regen: ["regen"],
   };
 
   const DRAFT_STORAGE_PREFIX = "resa-studio-draft:";
@@ -112,6 +112,15 @@
 
   function labelFor(key) {
     return FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  /** Escape a dynamic value before interpolating it into innerHTML. */
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function debounce(fn, ms) {
@@ -210,10 +219,6 @@
         is_override: false,
       };
       this.validationState = { ok: false, message };
-      const esc = (s) => String(s)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
       this.container.innerHTML = `
         <div class="load-error-panel">
           <p class="load-error-title">Could not load config</p>
@@ -602,6 +607,16 @@
     }
 
     _render() {
+      // Destroy viewers mounted by the previous render before replacing the
+      // DOM, so their window listeners / ResizeObservers / GL buffers are
+      // released instead of leaking on every re-render.
+      this.workspace?.destroyMounted?.();
+      if (this._regenProfileContainer?.instances) {
+        for (const inst of Object.values(this._regenProfileContainer.instances)) {
+          inst.destroy?.();
+        }
+        this._regenProfileContainer = null;
+      }
       this.container.innerHTML = "";
 
       const toolbar = document.createElement("div");
@@ -624,11 +639,9 @@
       const panels = document.createElement("div");
       panels.className = "editor-panels";
 
-      const visibleSections = SECTIONS.filter((s) => {
-        if (s.requiresRegen && !this.config.regen) return false;
-        if (s.modes && !s.modes.includes(this.mode)) return false;
-        return true;
-      });
+      const visibleSections = SECTIONS.filter(
+        (s) => !s.modes || s.modes.includes(this.mode)
+      );
 
       if (!visibleSections.some((s) => s.id === this.activeTab)) {
         this.activeTab = visibleSections[0]?.id || "design";
@@ -692,8 +705,6 @@
     }
 
     _renderSectionContent(sec) {
-      const wrap = document.createElement("div");
-
       if (sec.id === "design") return this._renderDesignTab();
       if (sec.id === "analyze") return this._renderAnalyzeTab();
       if (sec.id === "offdesign") return this._renderOffdesignTab();
@@ -701,47 +712,7 @@
       if (sec.id === "chamber") return this._renderChamberTab();
       if (sec.id === "cooling") return this._renderCoolingTab();
       if (sec.id === "combustion") return this._renderCombustionTab();
-
-      if (sec.id === "general") {
-        wrap.appendChild(this._buildGrid([[["engine", this.config.engine, this.resolver.propSchema(this.schema, "engine")]]]));
-        return wrap;
-      }
-
-      if (sec.optional) {
-        const key = sec.keys[0];
-        const enabled = this.config[key] != null;
-        const toggle = document.createElement("div");
-        toggle.className = "form-toggle-row";
-        toggle.innerHTML = `<label><input type="checkbox" ${enabled ? "checked" : ""}> Enable ${sec.title.toLowerCase()} sweeps</label>`;
-        toggle.querySelector("input").addEventListener("change", (e) => {
-          this.config[key] = e.target.checked
-            ? { ox_throttle: { ox_fraction: [0.5, 1.1], n: 25 } }
-            : null;
-          this._render();
-          this._emitChange(true);
-        });
-        wrap.appendChild(toggle);
-        if (!enabled) return wrap;
-      }
-
-      const groups = [];
-      for (const key of sec.keys) {
-        const value = this.config[key];
-        if (value == null) continue;
-        const schema = this.resolver.propSchema(this.schema, key);
-        if (!schema) continue;
-
-        if (key === "combustion") {
-          wrap.appendChild(this._renderCombustion(value, schema));
-          continue;
-        }
-
-        const title = sec.keys.length > 1 ? labelFor(key) : null;
-        groups.push(...this._flattenObject([key], value, schema, title));
-      }
-
-      if (groups.length) wrap.appendChild(this._buildGrid(groups));
-      return wrap;
+      return document.createElement("div");
     }
 
     _configSection(title, hint) {
@@ -1068,16 +1039,14 @@
         "CoolProp species strings and tank/manifold delivery temperatures."
       );
       const groups = this._flattenObject(["propellants"], p, schema);
-      const nameRow = groups.find((r) => r.key === "name");
-      if (nameRow) nameRow.key = "name";
       fluidsSec.body.appendChild(this._buildGrid(groups));
       wrap.appendChild(fluidsSec.el);
 
       const summary = document.createElement("div");
       summary.className = "propellant-summary";
       summary.innerHTML = `<div class="form-subhead">Resolved fluids</div>
-        <p class="form-hint">Oxidizer: <strong>${p.oxidizer || "—"}</strong> @ ${p.ox_temp_K ?? "—"} K<br>
-        Fuel: <strong>${p.fuel || "—"}</strong> @ ${p.fuel_temp_K ?? "—"} K</p>`;
+        <p class="form-hint">Oxidizer: <strong>${esc(p.oxidizer || "—")}</strong> @ ${esc(p.ox_temp_K ?? "—")} K<br>
+        Fuel: <strong>${esc(p.fuel || "—")}</strong> @ ${esc(p.fuel_temp_K ?? "—")} K</p>`;
       wrap.appendChild(summary);
 
       const backend = this.config.combustion?.backend;
@@ -1525,8 +1494,12 @@
         inp.step = "any";
         inp.value = arr[i] ?? "";
         inp.addEventListener("input", () => {
+          const v = parseFloat(inp.value);
+          // Keep the previous value while the field is empty/partial —
+          // writing NaN into the tuple would only cause validation churn.
+          if (Number.isNaN(v)) return;
           const next = [...(this._getPath(path) || [0, 0])];
-          next[i] = parseFloat(inp.value);
+          next[i] = v;
           this._setPath(path, next);
         });
         wrap.appendChild(inp);

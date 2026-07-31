@@ -254,6 +254,13 @@
       this.syncFromConfig();
     }
 
+    /** Remove window listeners and observers registered by this editor. */
+    destroy() {
+      window.removeEventListener("mousemove", this._onPlotMove);
+      window.removeEventListener("mouseup", this._onPlotUp);
+      this._resizeObs?.disconnect();
+    }
+
     syncFromConfig() {
       if (this._dragIdx != null) return;
       this.pts = getBreakpoints(this.editor, this.specId, this.sectionData).map((p) => [
@@ -967,6 +974,11 @@
     profileEditorsContainer.scalarGrid = scalarGrid;
 
     const syncEditors = () => {
+      // Destroy previous editor instances before recreating them, so their
+      // window listeners and ResizeObservers don't leak.
+      for (const inst of Object.values(profileEditorsContainer.instances || {})) {
+        inst.destroy?.();
+      }
       scalarGrid.innerHTML = "";
       editorsWrap.innerHTML = "";
       profileEditorsContainer.instances = {};
