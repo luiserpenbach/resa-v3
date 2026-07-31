@@ -810,62 +810,284 @@ function renderRun(data) {
   updatePinButton();
 }
 
-async function loadRuns() {
-  els.runsList.innerHTML = '<p class="placeholder">Loading…</p>';
-  try {
-    const runs = await api("/api/runs");
-    state.savedRuns = runs;
-    if (runs.length === 0) {
-      els.runsList.innerHTML = '<p class="placeholder">No saved runs yet.</p>';
-      syncCompareSelects();
+/* ── Runs KPI table ─────────────────────────────────────────── */
+
+// Priority columns (visible without horizontal scroll in a narrow sidebar)
+// come first: Run, Thrust, Isp, T_wall,max. Pc / Δp / warnings / age sit
+// behind the panel-local horizontal scroll.
+const RUN_COLUMNS = [
+  { key: "name", label: "Run", title: "Label / engine · config hash", numeric: false },
+  { key: "thrust_N", label: "F", title: "Thrust [N]", numeric: true, dec: 1 },
+  { key: "isp_s", label: "Isp", title: "Isp [s]", numeric: true, dec: 1 },
+  { key: "T_wall_max_K", label: "Tw", title: "T_wall,max [K]", numeric: true, dec: 0 },
+  { key: "pc_bar", label: "Pc", title: "Pc [bar]", numeric: true, dec: 1 },
+  { key: "dp_regen_bar", label: "Δp", title: "Δp_regen [bar]", numeric: true, dec: 1 },
+  { key: "n_warnings", label: "⚠", title: "Warnings", numeric: true, dec: 0 },
+  { key: "modified_at", label: "Age", title: "Last modified", numeric: true },
+];
+
+function sortRuns(runs) {
+  const { key, dir } = state.runSort;
+  const mul = dir === "asc" ? 1 : -1;
+  const val = (r) =>
+    key === "name" ? (r.label || r.engine || "").toLowerCase() : r[key];
+  return [...runs].sort((a, b) => {
+    const va = val(a);
+    const vb = val(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1; // nulls last regardless of direction
+    if (vb == null) return -1;
+    if (typeof va === "string") return mul * va.localeCompare(vb);
+    return mul * (va - vb);
+  });
+}
+
+function setRunSort(key) {
+  if (state.runSort.key === key) {
+    state.runSort.dir = state.runSort.dir === "asc" ? "desc" : "asc";
+  } else {
+    state.runSort = { key, dir: key === "name" ? "asc" : "desc" };
+  }
+  renderRunsTable();
+}
+
+function buildRunRow(run) {
+  const tr = document.createElement("tr");
+  tr.className = "run-row" + (run.is_baseline ? " is-baseline" : "");
+  tr.dataset.engine = run.engine;
+  tr.dataset.hash = run.config_hash;
+  if (run.note) tr.title = run.note;
+
+  const key = runKey(run.engine, run.config_hash);
+  const pick = state.compareA === key ? "[A]" : state.compareB === key ? "[B]" : "";
+
+  const nameTd = document.createElement("td");
+  nameTd.className = "run-name-cell";
+  nameTd.innerHTML = `
+    <div class="run-name-top">
+      <span class="run-label${run.label ? " has-label" : ""}">${esc(run.label || run.engine)}</span>
+      <span class="run-pick">${pick}</span>
+      ${run.is_baseline ? '<span class="baseline-badge">baseline</span>' : ""}
+    </div>
+    <div class="run-sub">${esc(run.engine)} · ${esc(run.config_hash.slice(0, 8))}</div>
+  `;
+
+  const top = nameTd.querySelector(".run-name-top");
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "btn-row-act";
+  editBtn.textContent = "✎";
+  editBtn.title = "Edit label";
+  editBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    startLabelEdit(run, tr);
+  });
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "btn-row-act btn-row-pin" + (run.is_baseline ? " is-pinned" : "");
+  pinBtn.textContent = "📌";
+  pinBtn.title = run.is_baseline ? "Unpin baseline" : "Pin as baseline";
+  pinBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleBaseline(run.engine, run.config_hash)
+      .catch((err) => console.error("Baseline toggle failed:", err));
+  });
+  top.appendChild(editBtn);
+  top.appendChild(pinBtn);
+  tr.appendChild(nameTd);
+
+  for (const col of RUN_COLUMNS.slice(1)) {
+    const td = document.createElement("td");
+    td.className = "num";
+    if (col.key === "modified_at") {
+      td.textContent = formatAge(run.modified_at);
+      td.title = formatRunTime(run.modified_at);
+    } else if (col.key === "n_warnings") {
+      const n = run.n_warnings || 0;
+      td.textContent = String(n);
+      if (n > 0) td.classList.add("run-warn-some");
+    } else {
+      td.textContent = fmtNum(run[col.key], col.dec);
+    }
+    tr.appendChild(td);
+  }
+
+  tr.addEventListener("click", (e) => {
+    if (e.shiftKey) {
+      pickCompareRun(run.engine, run.config_hash);
       return;
     }
+    openRun(run.engine, run.config_hash);
+  });
+  return tr;
+}
 
-    els.runsList.innerHTML = "";
-    for (const run of runs) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "nav-item nav-item-run";
-      btn.dataset.engine = run.engine;
-      btn.dataset.hash = run.config_hash;
-      const kpis =
-        run.thrust_N != null && run.isp_s != null
-          ? `${run.thrust_N.toFixed(0)} N · ${run.isp_s.toFixed(1)} s`
-          : "";
-      const key = `${run.engine}|${run.config_hash}`;
-      const pick =
-        state.compareA === key ? " [A]" : state.compareB === key ? " [B]" : "";
-      btn.innerHTML = `
-        <div class="run-title">${esc(run.engine)}${pick}</div>
-        <div class="run-meta">${kpis}${kpis ? " · " : ""}${formatRunTime(run.modified_at)}</div>
-      `;
-      btn.addEventListener("click", (e) => {
-        if (e.shiftKey) {
-          pickCompareRun(run.engine, run.config_hash);
-          return;
-        }
-        openRun(run.engine, run.config_hash);
-      });
-      els.runsList.appendChild(btn);
-    }
-    highlightActiveRun();
+function renderRunsTable() {
+  if (!state.runsList.length) {
+    els.runsList.innerHTML = '<p class="placeholder">No saved runs yet.</p>';
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "runs-table-wrap";
+  const table = document.createElement("table");
+  table.className = "runs-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const col of RUN_COLUMNS) {
+    const th = document.createElement("th");
+    th.title = col.title;
+    if (col.numeric) th.className = "num";
+    const active = state.runSort.key === col.key;
+    const ind = active ? (state.runSort.dir === "asc" ? "▲" : "▼") : "";
+    th.innerHTML = `${esc(col.label)}${ind ? `<span class="sort-ind">${ind}</span>` : ""}`;
+    th.addEventListener("click", () => setRunSort(col.key));
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const run of sortRuns(state.runsList)) {
+    tbody.appendChild(buildRunRow(run));
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  els.runsList.innerHTML = "";
+  els.runsList.appendChild(wrap);
+  highlightActiveRun();
+}
+
+async function loadRuns() {
+  if (!state.runsList.length) {
+    els.runsList.innerHTML = '<p class="placeholder">Loading…</p>';
+  }
+  try {
+    const runs = await api("/api/runs");
+    state.runsList = runs;
+    renderRunsTable();
     syncCompareSelects();
+    updatePinButton();
   } catch (err) {
     els.runsList.innerHTML = `<p class="placeholder" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
+}
+
+/** Swap the label into an inline input; Enter/blur saves, Escape cancels. */
+function startLabelEdit(run, tr) {
+  const top = tr.querySelector(".run-name-top");
+  if (!top || top.querySelector(".run-label-input")) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "run-label-input";
+  input.value = run.label || "";
+  input.maxLength = 200;
+  input.placeholder = run.engine;
+  top.replaceChildren(input);
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const val = input.value.trim();
+    if (!save || val === (run.label || "")) {
+      renderRunsTable();
+      return;
+    }
+    // Empty string clears the label server-side.
+    saveRunMeta(run.engine, run.config_hash, { label: val })
+      .catch((err) => console.error("Label save failed:", err));
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.focus();
+  input.select();
+}
+
+/** POST label/note, patch local state, then refetch the listing. */
+async function saveRunMeta(engine, configHash, patch) {
+  try {
+    await api(`/api/runs/${engine}/${configHash}/meta`, {
+      method: "POST",
+      body: JSON.stringify(patch),
+    });
+    const run = state.runsList.find(
+      (r) => r.engine === engine && r.config_hash === configHash
+    );
+    if (run) {
+      if ("label" in patch) run.label = patch.label || null;
+      if ("note" in patch) run.note = patch.note || null;
+    }
+    renderRunsTable();
+    if (
+      state.lastRunData &&
+      state.lastRunData.engine === engine &&
+      state.lastRunData.config_hash === configHash &&
+      "note" in patch
+    ) {
+      state.lastRunData.note = patch.note || null;
+    }
+    setStatus(`Saved metadata for ${engine}_${configHash}`);
+    await loadRuns();
+  } catch (err) {
+    setStatus(String(err.message), true);
+    renderRunsTable();
+  }
+}
+
+/** Pin a run as baseline, or unpin when it already is the baseline. */
+async function toggleBaseline(engine, configHash) {
+  const bl = getBaselineRun();
+  const isCurrent =
+    !!bl && bl.engine === engine && bl.config_hash === configHash;
+  try {
+    await api("/api/runs/baseline", {
+      method: "POST",
+      body: JSON.stringify(isCurrent ? {} : { engine, config_hash: configHash }),
+    });
+    for (const r of state.runsList) {
+      r.is_baseline =
+        !isCurrent && r.engine === engine && r.config_hash === configHash;
+    }
+    renderRunsTable();
+    refreshBaselineDependentUI();
+    setStatus(
+      isCurrent
+        ? "Baseline unpinned"
+        : `Baseline pinned: ${engine}_${configHash}`
+    );
+    await loadRuns();
+    refreshBaselineDependentUI();
+  } catch (err) {
+    setStatus(String(err.message), true);
+  }
+}
+
+/** Re-render the KPI/delta area and pin button after a baseline change. */
+function refreshBaselineDependentUI() {
+  if (state.lastRunData) renderKpiArea(state.lastRunData);
+  updatePinButton();
 }
 
 function runKey(engine, hash) {
   return `${engine}|${hash}`;
 }
 
-/** Cheaply refresh the [A]/[B] compare tags on already-rendered run buttons. */
+/** Cheaply refresh the [A]/[B] compare tags on already-rendered run rows. */
 function refreshCompareTags() {
-  for (const btn of els.runsList.querySelectorAll(".nav-item-run")) {
-    const key = runKey(btn.dataset.engine, btn.dataset.hash);
-    const pick = state.compareA === key ? " [A]" : state.compareB === key ? " [B]" : "";
-    const title = btn.querySelector(".run-title");
-    if (title) title.textContent = `${btn.dataset.engine}${pick}`;
+  for (const row of els.runsList.querySelectorAll(".run-row")) {
+    const key = runKey(row.dataset.engine, row.dataset.hash);
+    const pick = state.compareA === key ? "[A]" : state.compareB === key ? "[B]" : "";
+    const tag = row.querySelector(".run-pick");
+    if (tag) tag.textContent = pick;
   }
 }
 
@@ -890,7 +1112,7 @@ function pickCompareRun(engine, hash) {
 
 function syncCompareSelects() {
   if (!els.compareRunA || !els.compareRunB) return;
-  const opts = state.savedRuns.map((r) => ({
+  const opts = state.runsList.map((r) => ({
     value: runKey(r.engine, r.config_hash),
     label: `${r.engine}_${r.config_hash}`,
   }));
@@ -1412,6 +1634,19 @@ for (const dlg of [els.dialogNewProject, els.dialogNewConfig]) {
 els.btnCompareRuns?.addEventListener("click", compareSelectedRuns);
 els.compareRunA?.addEventListener("change", () => { state.compareA = els.compareRunA.value || null; });
 els.compareRunB?.addEventListener("change", () => { state.compareB = els.compareRunB.value || null; });
+els.btnPinBaseline?.addEventListener("click", () => {
+  const data = state.lastRunData;
+  if (!data?.engine || !data?.config_hash) return;
+  toggleBaseline(data.engine, data.config_hash)
+    .catch((err) => console.error("Baseline toggle failed:", err));
+});
+els.btnSaveNote?.addEventListener("click", () => {
+  const data = state.lastRunData;
+  if (!data?.engine || !data?.config_hash) return;
+  const note = els.runNoteInput ? els.runNoteInput.value.trim() : "";
+  saveRunMeta(data.engine, data.config_hash, { note })
+    .catch((err) => console.error("Note save failed:", err));
+});
 els.btnEdit?.addEventListener("click", enterEditMode);
 els.btnSave?.addEventListener("click", saveEdit);
 els.btnCancel?.addEventListener("click", cancelEdit);
