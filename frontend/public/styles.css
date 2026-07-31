@@ -1730,6 +1730,39 @@ table input {
   margin: 0.35rem 0;
 }
 
+.regen-margin-plot {
+  margin: 0.35rem 0;
+  min-width: 0;
+}
+.regen-margin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.2rem;
+}
+.thermal-fidelity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.thermal-fidelity .btn-inline.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ws-station-count {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.regen-margin-plot canvas {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--plot-bg);
+}
+
 .regen-thermal-plots {
   display: grid;
   grid-template-columns: 1fr 1fr;

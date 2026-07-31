@@ -48,11 +48,20 @@ resa_studio/         FastAPI app + adapters
 
 1. **Select a project** in the sidebar, then pick a config (or create a project / config with **+**).
 2. **Edit** — changes validate on blur; invalid fields are highlighted per tab.
+   Numeric fields nudge with **↑/↓** (one unit of the last decimal place;
+   **Shift** for 10×) and live previews follow.
 3. **Run fast** — in-memory pipeline, KPIs + off-design mini charts (no artifacts).
 4. **Full report** — writes `out/<engine>_<hash>/` with plots, PDF, CSV, regen
    artifacts when configured.
-5. **Saved runs** — open prior report folders; shift+click to pick compare A/B.
-6. **Campaigns** — run multi-config batches from `campaigns/*.yaml`.
+5. **Saved runs** — a sortable KPI table (thrust, Isp, T_wall,max, Pc, regen Δp,
+   warnings, age). Give runs a **label** (✎ on the row) and a note; shift+click
+   to pick compare A/B.
+6. **Pin a baseline** (📌) — every other run's KPIs then show **delta chips**
+   vs the baseline (green = favorable, red = unfavorable), on run detail and
+   fast-run results alike.
+7. **Campaigns** — run multi-config batches from `campaigns/*.yaml`, including
+   parametric design sweeps (`base:` + `sweep:` axes — see
+   [CONFIGURATION.md](CONFIGURATION.md)).
 
 ## Design workspace tabs
 
@@ -61,7 +70,7 @@ resa_studio/         FastAPI app + adapters
 | Design | Operating point, expansion mode (ε / pe / optimum) |
 | Analyze | Fixed geometry + test mass flows; contour preview |
 | Chamber | Contour & sizing with live 2D/3D preview |
-| Cooling | Channel layout, regen profile editors, sync matrix, thermal KPIs, STL/STEP export |
+| Cooling | Channel layout, regen profile editors, sync matrix, thermal KPIs, STL/STEP export. Thermal preview leads with a **margin plot** (wall temperature vs the material limit, min-margin callout, two-phase band) and a **Fast preview / Full stations** fidelity toggle |
 | Off-design | Structured sweep toggles; charts in Results after run |
 
 Draft edits are auto-saved to localStorage per config path. Undo/redo works
@@ -82,8 +91,10 @@ while editing.
 | POST | `/api/config/save` | Save edits to the file being edited (diffed against the `base:` config and fragment refs preserved when set) |
 | POST | `/api/runs/fast` | Fast pipeline (no disk write) |
 | POST | `/api/runs/full` | Full report folder |
-| GET | `/api/runs` | List saved runs |
+| GET | `/api/runs` | List saved runs (KPIs, labels, baseline flag) |
 | GET | `/api/runs/{engine}/{hash}` | Open saved run |
+| POST | `/api/runs/{engine}/{hash}/meta` | Set run label / note |
+| GET/POST | `/api/runs/baseline` | Get / pin / clear the comparison baseline |
 | POST | `/api/preview/contour` | Live contour (cached pipeline) |
 | POST | `/api/preview/cooling/*` | Section, 3D, export, suggest channels |
 | POST | `/api/preview/regen/thermal` | Reduced-station regen thermal preview |

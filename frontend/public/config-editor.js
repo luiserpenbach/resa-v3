@@ -131,6 +131,62 @@
     };
   }
 
+  /**
+   * Derive a nudge step from how the value is written: one unit of the last
+   * decimal place ("0.0005" → 0.0001, "25" → 1, "1.2" → 0.1). Handles plain
+   * decimals and scientific notation; returns null for anything else.
+   */
+  function nudgeStepFromString(raw) {
+    let m = raw.match(/^[+-]?\d+(?:\.(\d*))?$/);
+    if (m) {
+      const decimals = m[1] ? m[1].length : 0;
+      return { step: Math.pow(10, -decimals), decimals };
+    }
+    m = raw.match(/^[+-]?(?:\d+)?\.(\d+)$/);
+    if (m) {
+      const decimals = m[1].length;
+      return { step: Math.pow(10, -decimals), decimals };
+    }
+    m = raw.match(/^[+-]?\d+(?:\.(\d*))?[eE]([+-]?\d+)$/);
+    if (m) {
+      const mantDec = m[1] ? m[1].length : 0;
+      const exp = parseInt(m[2], 10);
+      return { step: Math.pow(10, exp - mantDec), decimals: Math.max(0, mantDec - exp) };
+    }
+    return null;
+  }
+
+  /**
+   * ArrowUp/ArrowDown nudging on a plain numeric input: steps by one unit of
+   * the last significant decimal place, Shift steps by 10×. Changes flow
+   * through the same "input" handler as typing, so validation and debounced
+   * previews fire exactly as they would for a keyed edit.
+   */
+  function attachArrowNudge(inp) {
+    inp.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      // Always suppress native number-input stepping / caret movement, even
+      // when we bail out — "do nothing" must mean nothing.
+      e.preventDefault();
+      if (inp.readOnly || inp.disabled) return;
+      const raw = inp.value.trim();
+      if (raw === "") return;
+      const cur = Number(raw);
+      if (!Number.isFinite(cur)) return;
+      const info = nudgeStepFromString(raw);
+      if (!info) return;
+      const dir = e.key === "ArrowUp" ? 1 : -1;
+      let next = cur + dir * (e.shiftKey ? 10 : 1) * info.step;
+      // Snap onto the step grid to keep float noise out of the string.
+      next = Math.round(next / info.step) * info.step;
+      if (inp.min !== "" && next < Number(inp.min)) next = Number(inp.min);
+      if (inp.max !== "" && next > Number(inp.max)) next = Number(inp.max);
+      const decimals = Math.min(info.decimals, 12);
+      inp.value = decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
   class SchemaResolver {
     constructor(schema) {
       this.defs = schema.$defs || {};
@@ -1474,6 +1530,7 @@
         };
         inp.addEventListener("input", apply);
         inp.addEventListener("change", () => this._notifyChange(true));
+        attachArrowNudge(inp);
         return inp;
       }
 
