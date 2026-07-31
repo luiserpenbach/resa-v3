@@ -1,6 +1,7 @@
 """Run orchestration — wraps pipeline + reporting."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -89,10 +90,87 @@ class RunService:
             artifacts=artifacts,
         )
 
+    # ------------------------------------------------- run metadata / baseline
+    _META_FILE = "studio_meta.json"
+
+    def _run_dir(self, engine: str, config_hash: str) -> Path:
+        return self.out_root / f"{engine}_{config_hash}"
+
+    def _read_meta(self, outdir: Path) -> dict[str, Any]:
+        path = outdir / self._META_FILE
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def set_run_meta(
+        self,
+        engine: str,
+        config_hash: str,
+        *,
+        label: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Merge label/note into the run's metadata (empty string clears)."""
+        outdir = self._run_dir(engine, config_hash)
+        if not (outdir / "results.yaml").is_file():
+            raise FileNotFoundError(f"run not found: {engine}/{config_hash}")
+        meta = self._read_meta(outdir)
+        for key, val in (("label", label), ("note", note)):
+            if val is None:
+                continue
+            val = val.strip()
+            if val:
+                meta[key] = val[:200] if key == "label" else val[:2000]
+            else:
+                meta.pop(key, None)
+        (outdir / self._META_FILE).write_text(
+            json.dumps(meta, indent=1), encoding="utf-8"
+        )
+        return meta
+
+    def _baseline_path(self) -> Path:
+        return self.out_root / "_studio" / "baseline.json"
+
+    def get_baseline(self) -> dict[str, str] | None:
+        """Pinned baseline run id ({engine, config_hash}) or None."""
+        path = self._baseline_path()
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or "engine" not in data:
+            return None
+        # a deleted run folder silently un-pins the baseline
+        outdir = self._run_dir(data["engine"], data.get("config_hash", ""))
+        if not (outdir / "results.yaml").is_file():
+            return None
+        return {"engine": data["engine"], "config_hash": data["config_hash"]}
+
+    def set_baseline(self, engine: str | None, config_hash: str | None) -> dict[str, Any]:
+        """Pin a run as the comparison baseline; engine=None clears the pin."""
+        path = self._baseline_path()
+        if engine is None:
+            path.unlink(missing_ok=True)
+            return {"baseline": None}
+        outdir = self._run_dir(engine, config_hash or "")
+        if not (outdir / "results.yaml").is_file():
+            raise FileNotFoundError(f"run not found: {engine}/{config_hash}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"engine": engine, "config_hash": config_hash}
+        path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+        return {"baseline": payload}
+
     def list_runs(self) -> list[dict[str, Any]]:
         """Scan out/ for completed report folders (must contain results.yaml)."""
         if not self.out_root.is_dir():
             return []
+        baseline = self.get_baseline()
         runs: list[dict[str, Any]] = []
         for outdir in self.out_root.iterdir():
             if not outdir.is_dir():
@@ -110,13 +188,29 @@ class RunService:
             with results_path.open(encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             tc = data.get("thrust_chamber") or {}
+            rg = data.get("regen") or {}
+            meta = self._read_meta(outdir)
             runs.append({
                 "engine": engine,
                 "config_hash": config_hash,
                 "outdir": rel_to(outdir, self.repo_root),
                 "mode": data.get("mode", "full"),
+                "analysis_mode": data.get("mode"),
                 "thrust_N": tc.get("thrust_N"),
                 "isp_s": tc.get("isp_s"),
+                "pc_bar": tc.get("pc_bar"),
+                "of_ratio": tc.get("of_ratio"),
+                "mdot_kg_s": tc.get("mdot_total_kg_s"),
+                "T_wall_max_K": rg.get("T_wall_max_K"),
+                "dp_regen_bar": rg.get("dp_bar"),
+                "n_warnings": len(data.get("warnings") or []),
+                "label": meta.get("label"),
+                "note": meta.get("note"),
+                "is_baseline": bool(
+                    baseline
+                    and baseline["engine"] == engine
+                    and baseline["config_hash"] == config_hash
+                ),
                 "modified_at": outdir.stat().st_mtime,
             })
         runs.sort(key=lambda r: r["modified_at"], reverse=True)
@@ -186,10 +280,19 @@ class RunService:
         if config_source:
             path_info = ConfigService(self.repo_root).path_info(config_source)
 
+        meta = self._read_meta(outdir)
+        baseline = self.get_baseline()
         return {
             "mode": data.get("mode", "full"),
             "engine": engine,
             "config_hash": config_hash,
+            "label": meta.get("label"),
+            "note": meta.get("note"),
+            "is_baseline": bool(
+                baseline
+                and baseline["engine"] == engine
+                and baseline["config_hash"] == config_hash
+            ),
             "analysis_mode": analysis_mode,
             "config": config_dict,
             "config_source": config_source,

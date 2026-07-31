@@ -227,6 +227,57 @@ def test_preview_pipeline_cache(client):
     assert stats2["entries"] >= 1
 
 
+def test_run_meta_and_baseline(tmp_path):
+    """Run labels/notes persist; baseline pin round-trips and marks listings."""
+    from resa_studio.adapters.run_service import RunService
+
+    out_root = tmp_path / "out"
+    svc = RunService(out_root=out_root)
+    out = svc.run_full(config_path=CI_CONFIG)
+    engine, config_hash = out.config.engine, out.config.config_hash
+
+    # meta merge + clear
+    svc.set_run_meta(engine, config_hash, label="taller channels", note="cand 3")
+    svc.set_run_meta(engine, config_hash, note="")           # clears note only
+    runs = svc.list_runs()
+    assert runs[0]["label"] == "taller channels"
+    assert runs[0]["note"] is None
+    assert runs[0]["pc_bar"] is not None                     # KPI columns present
+    assert runs[0]["is_baseline"] is False
+
+    # baseline pin
+    svc.set_baseline(engine, config_hash)
+    assert svc.get_baseline() == {"engine": engine, "config_hash": config_hash}
+    assert svc.list_runs()[0]["is_baseline"] is True
+    loaded = svc.load_existing(engine, config_hash)
+    assert loaded["is_baseline"] is True
+    assert loaded["label"] == "taller channels"
+
+    # clear pin
+    svc.set_baseline(None, None)
+    assert svc.get_baseline() is None
+
+    # unknown run rejected
+    with pytest.raises(FileNotFoundError):
+        svc.set_run_meta("NOPE", "deadbeefcafe", label="x")
+    with pytest.raises(FileNotFoundError):
+        svc.set_baseline("NOPE", "deadbeefcafe")
+
+
+def test_run_meta_and_baseline_api(client):
+    """API surface for labels + baseline."""
+    r = client.get("/api/runs/baseline")
+    assert r.status_code == 200
+    r = client.post(
+        "/api/runs/NOENGINE/deadbeefcafe/meta", json={"label": "x"}
+    )
+    assert r.status_code == 404
+    r = client.post(
+        "/api/runs/baseline", json={"engine": "NOENGINE", "config_hash": "dead"}
+    )
+    assert r.status_code == 404
+
+
 def test_preview_cache_slow_run_still_fresh(monkeypatch):
     """An entry from a pipeline slower than the TTL must be fresh on arrival."""
     import time as _time
