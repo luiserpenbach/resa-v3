@@ -82,9 +82,39 @@
       danger: get("--danger", "#e85d5d"),
       success: get("--success", "#3fb950"),
       textMuted: get("--text-muted", "#8b949e"),
+      text: get("--text", "#e6e8eb"),
       plotBg: get("--plot-bg", "#0f1014"),
       bg: get("--bg", "#0f1014"),
     };
+  }
+
+  /** Parse a CSS color (#rgb, #rrggbb, rgb()/rgba()) to [r,g,b] in 0..1. */
+  function cssColorToRgb(str, fallback) {
+    const s = (str || "").trim();
+    let m = /^#([0-9a-f]{3})$/i.exec(s);
+    if (m) {
+      return [0, 1, 2].map((i) => parseInt(m[1][i] + m[1][i], 16) / 255);
+    }
+    m = /^#([0-9a-f]{6})$/i.exec(s);
+    if (m) {
+      return [0, 1, 2].map((i) => parseInt(m[1].slice(i * 2, i * 2 + 2), 16) / 255);
+    }
+    m = /^rgba?\(([^)]+)\)$/i.exec(s);
+    if (m) {
+      const parts = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
+      if (parts.length >= 3 && parts.slice(0, 3).every((v) => isFinite(v))) {
+        return [parts[0] / 255, parts[1] / 255, parts[2] / 255];
+      }
+    }
+    return fallback;
+  }
+
+  function mixRgb(a, b, t) {
+    return [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+    ];
   }
 
   function attachViewMixin(viewer, { pan = false } = {}) {
@@ -1106,6 +1136,373 @@
     }
   }
 
+  /**
+   * Wall + integrated-channel assembly viewer (WebGL, flat shading).
+   *
+   * Three vertex buffers, each interleaved [pos.xyz, nrm.xyz] with per-face
+   * normals (vertices duplicated per triangle for a machined-metal look):
+   *   - inner wall shell (revolved r_inner..r_floor) — rebuilt on data change
+   *   - all N channel grooves (channel 0 curves instanced by rotation) —
+   *     rebuilt on data change
+   *   - closeout shell (revolved r_top..r_outer over the visible sector) —
+   *     rebuilt on data change AND when the cutaway angle changes
+   * Buffers are created lazily once, refilled via bufferData, and deleted in
+   * destroy() (same leak-fix conventions as ContourRevolve3D).
+   */
+  class WallAssembly3D {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.gl = canvas.getContext("webgl", { antialias: true });
+      this.data = null;
+      this.rotY = 0.9;
+      this.rotX = 0.3;
+      this.cutawayDeg = 90;
+      this.show = { inner: true, channels: true, closeout: true };
+      attachZoomMixin(this);
+      this._bufs = { inner: null, channels: null, closeout: null };
+      this._counts = { inner: 0, channels: 0, closeout: 0 };
+      this._norm = null;
+      this._drag = false;
+      this._last = null;
+      canvas.addEventListener("mousedown", (e) => {
+        this._drag = true;
+        this._last = [e.clientX, e.clientY];
+      });
+      this._onWindowUp = () => { this._drag = false; };
+      this._onWindowMove = (e) => {
+        if (!this._drag) return;
+        this.rotY += (e.clientX - this._last[0]) * 0.01;
+        this.rotX = Math.max(-1.35, Math.min(1.35, this.rotX + (e.clientY - this._last[1]) * 0.01));
+        this._last = [e.clientX, e.clientY];
+        this.draw();
+      };
+      window.addEventListener("mouseup", this._onWindowUp);
+      window.addEventListener("mousemove", this._onWindowMove);
+      this._resizeObs = new ResizeObserver(() => {
+        const parent = this.canvas.parentElement;
+        if (parent && !parent.classList.contains("hidden")) this.draw();
+      });
+      if (canvas.parentElement) this._resizeObs.observe(canvas.parentElement);
+    }
+
+    destroy() {
+      window.removeEventListener("mouseup", this._onWindowUp);
+      window.removeEventListener("mousemove", this._onWindowMove);
+      this._resizeObs?.disconnect();
+      const gl = this.gl;
+      if (gl) {
+        for (const key of Object.keys(this._bufs)) {
+          if (this._bufs[key]) {
+            gl.deleteBuffer(this._bufs[key]);
+            this._bufs[key] = null;
+          }
+        }
+        if (this._prog) {
+          gl.deleteProgram(this._prog);
+          this._prog = null;
+        }
+      }
+    }
+
+    setData(payload) {
+      this.data = payload;
+      if (payload?.profile?.x_m?.length) {
+        const xs = payload.profile.x_m;
+        const rOutMax = Math.max(...payload.profile.r_outer_m);
+        const xMin = Math.min(...xs);
+        const xMax = Math.max(...xs);
+        this._norm = {
+          cx: (xMin + xMax) / 2,
+          ext: Math.max(xMax - xMin, 2 * rOutMax, 1e-9),
+        };
+        this._uploadInner();
+        this._uploadChannels();
+        this._uploadCloseout();
+      } else {
+        this._norm = null;
+        this._counts = { inner: 0, channels: 0, closeout: 0 };
+      }
+      this.draw();
+    }
+
+    setCutaway(deg) {
+      this.cutawayDeg = deg;
+      if (this.data?.profile) this._uploadCloseout();
+      this.draw();
+    }
+
+    setShow(part, on) {
+      this.show[part] = !!on;
+      this.draw();
+    }
+
+    /** Interleaved [pos, per-face normal] triangle writer into a Float32Array. */
+    _writer(nTris) {
+      const arr = new Float32Array(nTris * 3 * 6);
+      let o = 0;
+      const tri = (p0, p1, p2) => {
+        const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
+        const vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
+        let nx = uy * vz - uz * vy;
+        let ny = uz * vx - ux * vz;
+        let nz = ux * vy - uy * vx;
+        const l = Math.hypot(nx, ny, nz) || 1;
+        nx /= l; ny /= l; nz /= l;
+        for (const p of [p0, p1, p2]) {
+          arr[o++] = p[0]; arr[o++] = p[1]; arr[o++] = p[2];
+          arr[o++] = nx; arr[o++] = ny; arr[o++] = nz;
+        }
+      };
+      const quad = (p00, p01, p11, p10) => {
+        tri(p00, p01, p11);
+        tri(p00, p11, p10);
+      };
+      return { arr, tri, quad, used: () => o };
+    }
+
+    /** Normalized point on a revolved surface: axial x, radius r, angle th. */
+    _rev(x, r, th) {
+      const { cx, ext } = this._norm;
+      return [(x - cx) / ext, (r * Math.cos(th)) / ext, (r * Math.sin(th)) / ext];
+    }
+
+    _upload(name, writer) {
+      const gl = this.gl;
+      if (!gl) return;
+      const used = writer.used();
+      const data = used === writer.arr.length ? writer.arr : writer.arr.subarray(0, used);
+      if (!this._bufs[name]) this._bufs[name] = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._bufs[name]);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      this._counts[name] = used / 6;
+    }
+
+    /** Revolve a [rLo, rHi] annular shell over [th0, th0+span]; end rings close it. */
+    _shellTris(writer, xs, rLo, rHi, th0, span, segs) {
+      const n = xs.length;
+      for (let j = 0; j < segs; j++) {
+        const t0 = th0 + (span * j) / segs;
+        const t1 = th0 + (span * (j + 1)) / segs;
+        for (let i = 0; i < n - 1; i++) {
+          // outer surface (rHi) and inner surface (rLo)
+          writer.quad(
+            this._rev(xs[i], rHi[i], t0), this._rev(xs[i + 1], rHi[i + 1], t0),
+            this._rev(xs[i + 1], rHi[i + 1], t1), this._rev(xs[i], rHi[i], t1)
+          );
+          writer.quad(
+            this._rev(xs[i], rLo[i], t1), this._rev(xs[i + 1], rLo[i + 1], t1),
+            this._rev(xs[i + 1], rLo[i + 1], t0), this._rev(xs[i], rLo[i], t0)
+          );
+        }
+        // annular end rings
+        for (const i of [0, n - 1]) {
+          writer.quad(
+            this._rev(xs[i], rLo[i], t0), this._rev(xs[i], rHi[i], t0),
+            this._rev(xs[i], rHi[i], t1), this._rev(xs[i], rLo[i], t1)
+          );
+        }
+      }
+    }
+
+    _uploadInner() {
+      const p = this.data.profile;
+      const n = p.x_m.length;
+      const segs = 64;
+      const w = this._writer(((n - 1) * 2 + 2) * segs * 2);
+      this._shellTris(w, p.x_m, p.r_inner_m, p.r_floor_m, 0, Math.PI * 2, segs);
+      this._upload("inner", w);
+    }
+
+    _uploadChannels() {
+      const d = this.data;
+      const c = d.channel;
+      const n = d.n_stations;
+      const N = d.n_channels;
+      const { cx, ext } = this._norm;
+      // per channel: 4 quad strips of (n-1) quads + 2 end caps (2 tris each)
+      const w = this._writer(N * ((n - 1) * 4 * 2 + 4));
+      const FL = new Array(n), FR = new Array(n), TL = new Array(n), TR = new Array(n);
+      for (let k = 0; k < N; k++) {
+        const phi = (2 * Math.PI * k) / N;
+        const cp = Math.cos(phi), sp = Math.sin(phi);
+        const rot = (p) => [
+          (p[0] - cx) / ext,
+          (p[1] * cp - p[2] * sp) / ext,
+          (p[1] * sp + p[2] * cp) / ext,
+        ];
+        for (let i = 0; i < n; i++) {
+          FL[i] = rot(c.floor_L[i]);
+          FR[i] = rot(c.floor_R[i]);
+          TL[i] = rot(c.top_L[i]);
+          TR[i] = rot(c.top_R[i]);
+        }
+        for (let i = 0; i < n - 1; i++) {
+          w.quad(FL[i], FL[i + 1], FR[i + 1], FR[i]);   // floor
+          w.quad(TR[i], TR[i + 1], TL[i + 1], TL[i]);   // top
+          w.quad(FR[i], FR[i + 1], TR[i + 1], TR[i]);   // side R
+          w.quad(TL[i], TL[i + 1], FL[i + 1], FL[i]);   // side L
+        }
+        for (const i of [0, n - 1]) {                    // end caps
+          w.tri(FL[i], FR[i], TR[i]);
+          w.tri(FL[i], TR[i], TL[i]);
+        }
+      }
+      this._upload("channels", w);
+    }
+
+    _uploadCloseout() {
+      const p = this.data.profile;
+      const n = p.x_m.length;
+      const cut = (Math.max(0, Math.min(180, this.cutawayDeg)) * Math.PI) / 180;
+      const span = Math.PI * 2 - cut;
+      // cutaway sector centered on +z (theta = pi/2); model can be rotated
+      const th0 = Math.PI / 2 + cut / 2;
+      const segs = Math.max(1, Math.ceil((64 * span) / (Math.PI * 2)));
+      const cutFaces = cut > 1e-6 ? 2 * (n - 1) * 2 : 0;
+      const w = this._writer((((n - 1) * 2 + 2) * segs * 2) + cutFaces);
+      this._shellTris(w, p.x_m, p.r_top_m, p.r_outer_m, th0, span, segs);
+      if (cut > 1e-6) {
+        // flat radial faces along the two cut planes so the shell reads solid
+        for (const th of [th0, th0 + span]) {
+          for (let i = 0; i < n - 1; i++) {
+            w.quad(
+              this._rev(p.x_m[i], p.r_top_m[i], th),
+              this._rev(p.x_m[i + 1], p.r_top_m[i + 1], th),
+              this._rev(p.x_m[i + 1], p.r_outer_m[i + 1], th),
+              this._rev(p.x_m[i], p.r_outer_m[i], th)
+            );
+          }
+        }
+      }
+      this._upload("closeout", w);
+    }
+
+    /**
+     * Orthographic model-view-projection: rotation, then zoom applied to
+     * x/y only. Clip-space z keeps a fixed scale so geometry never leaves
+     * the [-1, 1] depth range at high zoom (a translated/zoomed z would
+     * clip the whole mesh away).
+     */
+    _mvp() {
+      const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
+      const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
+      const s = 1.3 * (this.zoom || 1);
+      const zs = 0.9;
+      return new Float32Array([
+        cy * s, sx * sy * s, -cx * sy * zs, 0,
+        0, cx * s, sx * zs, 0,
+        sy * s, -sx * cy * s, cx * cy * zs, 0,
+        0, 0, 0, 1,
+      ]);
+    }
+
+    /** Pure rotation (column-major mat3) for lighting normals. */
+    _rotMat() {
+      const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
+      const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
+      return new Float32Array([
+        cy, sx * sy, -cx * sy,
+        0, cx, sx,
+        sy, -sx * cy, cx * cy,
+      ]);
+    }
+
+    _program(gl) {
+      if (this._prog) return this._prog;
+      const vs = `
+        attribute vec3 a_pos;
+        attribute vec3 a_nrm;
+        uniform mat4 u_mvp;
+        uniform mat3 u_rot;
+        varying vec3 v_n;
+        void main() {
+          v_n = u_rot * a_nrm;
+          gl_Position = u_mvp * vec4(a_pos, 1.0);
+        }`;
+      const fs = `
+        precision mediump float;
+        varying vec3 v_n;
+        uniform vec3 u_col;
+        void main() {
+          vec3 n = normalize(v_n);
+          float d = abs(dot(n, normalize(vec3(0.35, 0.5, 0.78))));
+          gl_FragColor = vec4(u_col * (0.38 + 0.62 * d), 1.0);
+        }`;
+      const sh = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      };
+      const p = gl.createProgram();
+      gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
+      gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(p);
+      this._prog = p;
+      this._loc = {
+        pos: gl.getAttribLocation(p, "a_pos"),
+        nrm: gl.getAttribLocation(p, "a_nrm"),
+        mvp: gl.getUniformLocation(p, "u_mvp"),
+        rot: gl.getUniformLocation(p, "u_rot"),
+        col: gl.getUniformLocation(p, "u_col"),
+      };
+      return p;
+    }
+
+    _drawPart(name, col) {
+      const gl = this.gl;
+      const buf = this._bufs[name];
+      const count = this._counts[name];
+      if (!buf || !count) return;
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      const stride = 24;
+      gl.enableVertexAttribArray(this._loc.pos);
+      gl.vertexAttribPointer(this._loc.pos, 3, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(this._loc.nrm);
+      gl.vertexAttribPointer(this._loc.nrm, 3, gl.FLOAT, false, stride, 12);
+      gl.uniform3fv(this._loc.col, col);
+      gl.drawArrays(gl.TRIANGLES, 0, count);
+    }
+
+    draw() {
+      const gl = this.gl;
+      if (!gl) return;
+      const parent = this.canvas.parentElement;
+      if (!parent || parent.classList.contains("hidden")) return;
+      const rect = parent.getBoundingClientRect();
+      const w = Math.max(Math.min(rect.width - 8, 460), 120);
+      if (rect.width < 8) return;
+      const h = w;
+      const dpr = window.devicePixelRatio || 1;
+      this.canvas.width = Math.round(w * dpr);
+      this.canvas.height = Math.round(h * dpr);
+      this.canvas.style.width = `${w}px`;
+      this.canvas.style.height = `${h}px`;
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+      const colors = canvasColors();
+      const bg = cssColorToRgb(colors.plotBg, [0.06, 0.063, 0.078]);
+      gl.clearColor(bg[0], bg[1], bg[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+      if (!this.data?.profile || !this._norm) return;
+
+      gl.useProgram(this._program(gl));
+      gl.uniformMatrix4fv(this._loc.mvp, false, this._mvp());
+      gl.uniformMatrix3fv(this._loc.rot, false, this._rotMat());
+
+      const text = cssColorToRgb(colors.text, [0.9, 0.91, 0.92]);
+      const border = cssColorToRgb(colors.border, [0.16, 0.18, 0.21]);
+      const accent = cssColorToRgb(colors.accent, [0.29, 0.62, 1]);
+      // Neutral machined-metal tones derived from theme text/border; the
+      // closeout sits closer to the border tone so the two shells read apart
+      // in both light and dark themes.
+      if (this.show.inner) this._drawPart("inner", mixRgb(text, border, 0.45));
+      if (this.show.channels) this._drawPart("channels", accent);
+      if (this.show.closeout) this._drawPart("closeout", mixRgb(text, border, 0.72));
+    }
+  }
+
   class DesignWorkspace {
     constructor(editor) {
       this.editor = editor;
@@ -1118,13 +1515,15 @@
       this._debouncedContour = debounce(() => this._fetchContour(), PREVIEW_DEBOUNCE_MS);
       this._debouncedCooling = debounce(() => this._fetchCooling(), PREVIEW_DEBOUNCE_MS);
       this._debounced3d = debounce(() => this._fetchCooling3d(), PREVIEW_DEBOUNCE_MS);
+      this._debouncedAssembly3d = debounce(() => this._fetchAssembly3d(), PREVIEW_DEBOUNCE_MS);
       this._debouncedThermal = debounce(() => this._fetchThermal(), 800);
       this._instances = new WeakMap();
       this._mounted = [];
       this._loadingCounts = new WeakMap();
-      this._abort = { contour: null, cooling: null, cooling3d: null, thermal: null };
-      this._seq = { contour: 0, cooling: 0, cooling3d: 0, thermal: 0 };
+      this._abort = { contour: null, cooling: null, cooling3d: null, assembly3d: null, thermal: null };
+      this._seq = { contour: 0, cooling: 0, cooling3d: 0, assembly3d: 0, thermal: 0 };
       this._mesh3dCache = null;
+      this._assembly3dCache = null;
       this.thermalData = null;
       // Thermal preview fidelity — "preview" (reduced stations) or "full".
       // Session-scoped: lives on the workspace state object, no localStorage.
@@ -1161,6 +1560,9 @@
       if (!this.cooling3dVisible && !this._mesh3dCache) {
         this._fetchCooling3d(null, { quiet: true });
       }
+      if (!this.cooling3dVisible && !this._assembly3dCache) {
+        this._fetchAssembly3d(null, { quiet: true });
+      }
       if (this.editor?.config?.regen?.solver?.enabled !== false) {
         this._debouncedThermal();
       }
@@ -1193,9 +1595,13 @@
 
     onConfigChange() {
       this._mesh3dCache = null;
+      this._assembly3dCache = null;
       this._debouncedContour();
       this._debouncedCooling();
-      if (this.cooling3dVisible) this._debounced3d();
+      if (this.cooling3dVisible) {
+        this._debounced3d();
+        this._debouncedAssembly3d();
+      }
       if (this.editor?.config?.regen?.solver?.enabled !== false) {
         this._debouncedThermal();
       }
@@ -1205,7 +1611,10 @@
     refresh() {
       this._fetchContour();
       this._fetchCooling();
-      if (this.editor?.config?.regen) this._fetchCooling3d(null, { quiet: true });
+      if (this.editor?.config?.regen) {
+        this._fetchCooling3d(null, { quiet: true });
+        this._fetchAssembly3d(null, { quiet: true });
+      }
       if (this.editor?.config?.regen?.solver?.enabled !== false) {
         this._fetchThermal();
       }
@@ -1429,6 +1838,51 @@
       }
     }
 
+    _assemblyCaption(data) {
+      if (!data?.ok) return "";
+      return `${data.n_channels} channels · ${data.helical ? "helical" : "axial"}`;
+    }
+
+    async _fetchAssembly3d(wrapFilter, { quiet = false } = {}) {
+      const cfg = this.editor.getConfig();
+      if (!cfg) return;
+      const { signal, seq } = this._beginPreview("assembly3d");
+      const wraps = wrapFilter ? [wrapFilter] : [...this._coolingWraps()];
+      const started = [];
+      if (!quiet) {
+        for (const wrap of wraps) {
+          this._loadingStart(wrap, "Building wall assembly…");
+          started.push(wrap);
+        }
+      }
+      try {
+        const data = await postPreview("cooling/assembly3d", cfg, {}, { signal });
+        if (this._isStale("assembly3d", seq)) return;
+        this._assembly3dCache = data;
+        for (const wrap of wraps) {
+          const inst = this._instances.get(wrap);
+          if (inst?.assembly3d) {
+            inst.assembly3d.setData(data);
+            requestAnimationFrame(() => inst.assembly3d.draw());
+          }
+          const cap = wrap.querySelector(".ws-assembly-caption");
+          if (cap) cap.textContent = this._assemblyCaption(data);
+        }
+      } catch (e) {
+        if (e.name === "AbortError") return;
+        if (this._isStale("assembly3d", seq)) return;
+        for (const wrap of wraps) {
+          const cap = wrap.querySelector(".ws-assembly-caption");
+          if (cap) cap.textContent = e.message;
+        }
+      } finally {
+        // Balance every _loadingStart even for stale/aborted requests.
+        for (const wrap of started) {
+          this._loadingEnd(wrap);
+        }
+      }
+    }
+
     async _fetchCooling(x_m) {
       const cfg = this.editor.getConfig();
       if (!cfg) return;
@@ -1594,16 +2048,53 @@
             <canvas class="ws-channel-3d"></canvas>
           </div>
         </section>
+
+        <section class="regen-design-section regen-assembly-section">
+          <h3 class="form-section-title">7 · Wall assembly</h3>
+          <p class="form-section-hint">Inner wall, milled channel grooves and closeout as built. The cutaway removes a sector of the closeout to expose the channels.</p>
+          <div class="workspace-preview-toolbar assembly-controls">
+            <label class="toggle-inline ws-asm-inner"><input type="checkbox" checked> Inner wall</label>
+            <label class="toggle-inline ws-asm-channels"><input type="checkbox" checked> Channels</label>
+            <label class="toggle-inline ws-asm-closeout"><input type="checkbox" checked> Closeout</label>
+            <label class="workspace-slider-label ws-asm-cutaway-label">Cutaway
+              <input type="range" class="ws-asm-cutaway" min="0" max="180" step="1" value="90" />
+              <span class="ws-asm-cutaway-value">90°</span>
+            </label>
+          </div>
+          <div class="workspace-canvas-wrap ws-assembly-view has-viewport-zoom">
+            <canvas class="ws-assembly-3d"></canvas>
+          </div>
+          <p class="workspace-preview-hint ws-assembly-caption"></p>
+        </section>
       `;
       container.appendChild(wrap);
 
       const section = new ThroatSectionCanvas(wrap.querySelector(".ws-throat-section"));
       const mesh3d = new ChannelMesh3D(wrap.querySelector(".ws-channel-3d"));
       const marginPlot = new MarginPlotCanvas(wrap.querySelector(".ws-margin-plot"));
+      const assembly3d = new WallAssembly3D(wrap.querySelector(".ws-assembly-3d"));
       mountViewportZoom(wrap.querySelector(".ws-cool-section-view"), () => section);
       mountViewportZoom(wrap.querySelector(".ws-cool-3d-view"), () => mesh3d);
-      this._instances.set(wrap, { section, mesh3d, marginPlot, wrap, editor });
-      this._mounted.push(section, mesh3d, marginPlot);
+      mountViewportZoom(wrap.querySelector(".ws-assembly-view"), () => assembly3d);
+      this._instances.set(wrap, { section, mesh3d, marginPlot, assembly3d, wrap, editor });
+      this._mounted.push(section, mesh3d, marginPlot, assembly3d);
+
+      // Assembly controls only rebuild/redraw locally — no refetch.
+      for (const [cls, part] of [
+        ["ws-asm-inner", "inner"],
+        ["ws-asm-channels", "channels"],
+        ["ws-asm-closeout", "closeout"],
+      ]) {
+        wrap.querySelector(`.${cls} input`).addEventListener("change", (e) => {
+          assembly3d.setShow(part, e.target.checked);
+        });
+      }
+      const cutSlider = wrap.querySelector(".ws-asm-cutaway");
+      cutSlider.addEventListener("input", () => {
+        const deg = parseFloat(cutSlider.value) || 0;
+        wrap.querySelector(".ws-asm-cutaway-value").textContent = `${Math.round(deg)}°`;
+        assembly3d.setCutaway(deg);
+      });
 
       const setFidelity = (fidelity) => {
         if (this.thermalFidelity === fidelity) return;
@@ -1662,6 +2153,13 @@
       if (this.sectionData) this._applySectionToWrap(wrap);
       else this._debouncedCooling();
       this._fetchCooling3d(wrap, { quiet: true });
+      if (this._assembly3dCache) {
+        assembly3d.setData(this._assembly3dCache);
+        const cap = wrap.querySelector(".ws-assembly-caption");
+        if (cap) cap.textContent = this._assemblyCaption(this._assembly3dCache);
+      } else {
+        this._fetchAssembly3d(wrap, { quiet: true });
+      }
       this._updateThermalPanels();
       return wrap;
     }
