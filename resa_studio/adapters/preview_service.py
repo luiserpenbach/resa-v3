@@ -192,6 +192,53 @@ def preview_cooling_3d(data: dict[str, Any], channel_id: int = 0) -> dict[str, A
     }
 
 
+def preview_cooling_assembly3d(
+    data: dict[str, Any], max_stations: int = 160
+) -> dict[str, Any]:
+    """Wall + integrated-channel assembly geometry for the 3D viewer.
+
+    Sends the meridian wall profile plus channel 0's four corner curves;
+    channel k is exactly channel 0 rotated by 2*pi*k/N, so the client
+    instances the rest. Stations are decimated to ``max_stations`` for a
+    compact payload.
+    """
+    from resa.regen_channels.mesh import channel_corner_curves
+
+    cfg, result = _pipeline_result(data)
+    lay = _build_layout(cfg, result)
+
+    n = len(lay.x)
+    step = max(1, int(np.ceil(n / max_stations)))
+    idx = np.arange(0, n, step)
+    if idx[-1] != n - 1:
+        idx = np.append(idx, n - 1)
+
+    curves = channel_corner_curves(lay, 0)
+    # display-only closeout thickness above the channel tops (not a config
+    # field today; median inner-wall thickness is a sensible visual default)
+    closeout_t = float(np.median(lay.t_wall))
+
+    def _prof(arr):
+        return np.asarray(arr)[idx].tolist()
+
+    return {
+        "ok": True,
+        "n_channels": int(lay.N),
+        "n_stations": int(len(idx)),
+        "profile": {
+            "x_m": _prof(lay.x),
+            "r_inner_m": _prof(lay.r),
+            "r_floor_m": _prof(lay.r + lay.t_wall),
+            "r_top_m": _prof(lay.r + lay.t_wall + lay.h),
+            "r_outer_m": _prof(lay.r + lay.t_wall + lay.h + closeout_t),
+        },
+        "channel": {name: np.asarray(c)[idx].tolist()
+                    for name, c in curves.items()},
+        "helical": bool(np.any(np.abs(lay.beta) > 1e-9)),
+        "closeout_thickness_m": closeout_t,
+    }
+
+
 def export_channel(
     data: dict[str, Any],
     channel_id: int = 0,
