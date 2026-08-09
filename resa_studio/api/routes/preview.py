@@ -90,6 +90,16 @@ def cooling_3d(body: Cooling3DBody) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/cooling/assembly3d")
+def cooling_assembly3d(body: ConfigBody) -> dict[str, Any]:
+    try:
+        return preview_service.preview_cooling_assembly3d(body.config)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=preview_service.format_validation_error(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/cooling/export-channel")
 def export_channel(body: ExportChannelBody) -> FileResponse:
     try:

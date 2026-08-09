@@ -200,6 +200,52 @@ def test_preview_cooling_section(client):
     assert body["station"]["n_channels"] >= 4
 
 
+def test_preview_cooling_assembly3d(client):
+    resolved = client.get(
+        "/api/config/resolve",
+        params={"config_path": "configs/ci/e2_c1_design_regen.yaml"},
+    ).json()
+    r = client.post(
+        "/api/preview/cooling/assembly3d", json={"config": resolved["config"]}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["n_channels"] >= 4
+    n = body["n_stations"]
+    prof = body["profile"]
+    for key in ("x_m", "r_inner_m", "r_floor_m", "r_top_m", "r_outer_m"):
+        assert len(prof[key]) == n
+    # radial ordering must hold everywhere
+    for i in range(n):
+        assert (prof["r_inner_m"][i] < prof["r_floor_m"][i]
+                < prof["r_top_m"][i] < prof["r_outer_m"][i])
+    for name in ("floor_L", "floor_R", "top_L", "top_R"):
+        curve = body["channel"][name]
+        assert len(curve) == n and len(curve[0]) == 3
+
+
+def test_channel_rotation_instancing_premise():
+    """channel k must equal channel 0 rotated by 2*pi*k/N about the x axis."""
+    import numpy as np
+
+    import tests.test_regen_channels as trc
+    from resa.regen_channels.mesh import channel_corner_curves
+
+    _, lay = trc.make({"channels.helix.profile": 20.0})   # helical, worst case
+    k = 3
+    ang = 2 * np.pi * k / lay.N
+    rot = np.array([
+        [1, 0, 0],
+        [0, np.cos(ang), -np.sin(ang)],
+        [0, np.sin(ang), np.cos(ang)],
+    ])
+    c0 = channel_corner_curves(lay, 0)
+    ck = channel_corner_curves(lay, k)
+    for name in c0:
+        assert np.allclose(c0[name] @ rot.T, ck[name], atol=1e-12)
+
+
 def test_preview_export_stl(client):
     resolved = client.get("/api/config/resolve", params={"config_path": CI_CONFIG}).json()
     r = client.post(

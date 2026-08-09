@@ -70,7 +70,7 @@ resa_studio/         FastAPI app + adapters
 | Design | Operating point, expansion mode (ε / pe / optimum) |
 | Analyze | Fixed geometry + test mass flows; contour preview |
 | Chamber | Contour & sizing with live 2D/3D preview |
-| Cooling | Channel layout, regen profile editors, sync matrix, thermal KPIs, STL/STEP export. Thermal preview leads with a **margin plot** (wall temperature vs the material limit, min-margin callout, two-phase band) and a **Fast preview / Full stations** fidelity toggle |
+| Cooling | Channel layout, regen profile editors, sync matrix, thermal KPIs, STL/STEP export. Thermal preview leads with a **margin plot** (wall temperature vs the material limit, min-margin callout, two-phase band) and a **Fast preview / Full stations** fidelity toggle. A **wall assembly 3D view** shows the wall with integrated channels — toggle inner wall / channels / closeout, and cut away an angular sector of the closeout to expose the channel grooves |
 | Off-design | Structured sweep toggles; charts in Results after run |
 
 Draft edits are auto-saved to localStorage per config path. Undo/redo works
