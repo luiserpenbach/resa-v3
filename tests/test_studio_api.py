@@ -158,6 +158,18 @@ def test_validate_dict(client):
     assert r.json()["engine"] == "EX15"
 
 
+def test_run_fast_includes_film(client):
+    resolved = client.get("/api/config/resolve", params={"config_path": CI_CONFIG}).json()
+    cfg = dict(resolved["config"])
+    cfg["film_cooling"] = {"fraction": 0.04, "side": "fuel"}
+    # EX15 of_ratio is 5 → fuel fraction 1/6 ≈ 0.167, so 0.04 is valid
+    r = client.post("/api/runs/fast", json={"config": cfg})
+    assert r.status_code == 200
+    film = r.json()["result"].get("film")
+    assert film is not None
+    assert film["fraction"] == 0.04
+
+
 def test_run_fast_inline_config(client):
     resolved = client.get("/api/config/resolve", params={"config_path": CI_CONFIG}).json()
     r = client.post("/api/runs/fast", json={"config": resolved["config"]})
@@ -319,9 +331,13 @@ def test_run_meta_and_baseline_api(client):
     )
     assert r.status_code == 404
     r = client.post(
-        "/api/runs/baseline", json={"engine": "NOENGINE", "config_hash": "dead"}
+        "/api/runs/baseline", json={"engine": "NOENGINE", "config_hash": "deadbeefcafe"}
     )
     assert r.status_code == 404
+    r = client.post(
+        "/api/runs/baseline", json={"engine": "../etc", "config_hash": "deadbeefcafe"}
+    )
+    assert r.status_code == 400
 
 
 def test_preview_cache_slow_run_still_fresh(monkeypatch):
@@ -639,6 +655,77 @@ def test_save_overlay_keeps_ref_equal_to_inherited(client):
         assert "chamber: chamber_E2_TC_01.yaml" in saved
     finally:
         thin.unlink(missing_ok=True)
+
+
+def test_project_list_skips_fragment_yaml(client):
+    r = client.get("/api/projects/list")
+    assert r.status_code == 200
+    e2 = next(p for p in r.json() if p["slug"] == "E2-1A")
+    names = {c["name"] for c in e2["configs"]}
+    assert "design" in names
+    assert "asbuilt" in names
+    assert "prop_n2o_ethanol" not in names
+    assert "chamber_E2_TC_01" not in names
+    assert "cooling_none" not in names
+
+
+def test_invalid_project_slug_is_400(client):
+    r = client.get("/api/projects/../etc")
+    assert r.status_code in (400, 404, 422)
+
+
+def test_save_conflict_when_file_changed(client):
+    from resa_studio.settings import REPO_ROOT
+
+    save_target = "configs/projects/ex15/design.yaml"
+    resolved = client.get("/api/config/resolve", params={"config_path": save_target}).json()
+    assert resolved.get("file_sha256")
+    out_file = REPO_ROOT / save_target
+    original = out_file.read_text(encoding="utf-8")
+    cfg = dict(resolved["config"])
+    cfg["operating_point"] = dict(cfg["operating_point"])
+    cfg["operating_point"]["thrust_N"] = 15151
+    try:
+        out_file.write_text(original + "\n# concurrent edit\n", encoding="utf-8")
+        r = client.post(
+            "/api/config/save",
+            json={
+                "config_path": save_target,
+                "config": cfg,
+                "expected_file_sha256": resolved["file_sha256"],
+            },
+        )
+        assert r.status_code == 409
+    finally:
+        out_file.write_text(original, encoding="utf-8")
+
+
+def test_campaign_service_writes_to_named_subdir(tmp_path):
+    pytest.importorskip("plotly")
+    from resa_studio.adapters.campaign_service import CampaignService
+
+    svc = CampaignService(out_root=tmp_path)
+    out = svc.run("campaigns/ci_golden.yaml")
+    assert out["ok"] is True
+    dest = tmp_path / "ci_golden_output"
+    assert dest.is_dir()
+    assert (dest / "campaign_rollup.csv").is_file()
+    # artifacts are only this campaign's files, not the whole out/ tree
+    assert all(not p.startswith("..") for p in out["artifacts"])
+    assert any(name.endswith("campaign_rollup.csv") for name in out["artifacts"])
+
+
+def test_campaign_path_must_stay_under_campaigns(client):
+    r = client.post(
+        "/api/campaigns/run",
+        json={"campaign_path": "configs/ci/e2_c1_design.yaml"},
+    )
+    assert r.status_code == 400
+    r2 = client.post(
+        "/api/campaigns/run",
+        json={"campaign_path": "/etc/passwd"},
+    )
+    assert r2.status_code in (400, 404)
 
 
 def test_campaigns_list(client):

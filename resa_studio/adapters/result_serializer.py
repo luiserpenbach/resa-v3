@@ -67,6 +67,9 @@ def result_to_dict(res: EngineResult, *, include_arrays: bool = False) -> dict[s
             "high": scalars(u.tc_hi),
         }
 
+    if res.film is not None:
+        payload["film"] = {k: _clean(v) for k, v in res.film.summary().items()}
+
     if res.regen is not None:
         payload["regen"] = res.regen.summary()
 

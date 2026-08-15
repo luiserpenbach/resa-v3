@@ -87,6 +87,8 @@ def set_run_meta(engine: str, config_hash: str, body: RunMetaRequest) -> dict[st
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "engine": engine, "config_hash": config_hash, **meta}
 
 
@@ -106,6 +108,8 @@ def set_baseline(body: BaselineRequest) -> dict[str, Any]:
         return _runs.set_baseline(body.engine, body.config_hash)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/fast", response_model=RunResponse)

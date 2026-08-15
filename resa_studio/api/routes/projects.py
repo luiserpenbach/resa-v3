@@ -36,6 +36,8 @@ def get_project(slug: str) -> dict[str, Any]:
         return _projects.get_project(slug)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/create")

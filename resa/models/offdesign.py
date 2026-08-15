@@ -65,39 +65,59 @@ def run(
                 f"{len(fracs)-len(valid)} of {len(fracs)} points dropped "
                 f"(extend combustion table to cover deeper throttle)"
             )
-        pts = [ev(f * tc.mdot_ox_kg_s, tc.mdot_fuel_kg_s) for f in valid]
-        ox_sweep = _collect("ox_throttle", pts)
+        if not valid:
+            notes.append(
+                f"ox_throttle skipped: every point falls outside the O/F table "
+                f"[{of_lo:g}, {of_hi:g}]"
+            )
+        else:
+            pts = [ev(f * tc.mdot_ox_kg_s, tc.mdot_fuel_kg_s) for f in valid]
+            ox_sweep = _collect("ox_throttle", pts)
 
     if od.of_sweep is not None:
         s = od.of_sweep
         lo = max(s.of_range[0], of_lo)
         hi = min(s.of_range[1], of_hi)
-        if (lo, hi) != tuple(s.of_range):
-            notes.append(f"of_sweep clipped to O/F table: [{lo:g}, {hi:g}]")
-        ofs = np.linspace(lo, hi, s.n)
-        mdot = tc.mdot_total_kg_s
-        pts = [ev(mdot * o / (1 + o), mdot / (1 + o)) for o in ofs]
-        of_sweep = _collect("of_sweep", pts)
+        if lo > hi:
+            notes.append(
+                f"of_sweep skipped: requested [{s.of_range[0]:g}, {s.of_range[1]:g}] "
+                f"is disjoint from the O/F table [{of_lo:g}, {of_hi:g}]"
+            )
+        else:
+            if (lo, hi) != tuple(s.of_range):
+                notes.append(f"of_sweep clipped to O/F table: [{lo:g}, {hi:g}]")
+            ofs = np.linspace(lo, hi, s.n)
+            mdot = tc.mdot_total_kg_s
+            pts = [ev(mdot * o / (1 + o), mdot / (1 + o)) for o in ofs]
+            of_sweep = _collect("of_sweep", pts)
 
     if od.envelope is not None:
         s = od.envelope
         tf = np.linspace(*s.throttle_fraction, s.n[0])
         lo = max(s.of_range[0], of_lo)
         hi = min(s.of_range[1], of_hi)
-        if (lo, hi) != tuple(s.of_range):
-            notes.append(f"envelope clipped to O/F table: [{lo:g}, {hi:g}]")
-        ofs = np.linspace(lo, hi, s.n[1])
-        shape = (len(ofs), len(tf))
-        pc = np.zeros(shape); F = np.zeros(shape)
-        isp = np.zeros(shape); sep = np.zeros(shape, dtype=bool)
-        for i, o in enumerate(ofs):
-            for j, f in enumerate(tf):
-                mdot = f * tc.mdot_total_kg_s
-                p = ev(mdot * o / (1 + o), mdot / (1 + o))
-                pc[i, j], F[i, j] = p["pc_bar"], p["thrust_N"]
-                isp[i, j], sep[i, j] = p["isp_s"], p["separated"]
-        env = EnvelopeResult(throttle_frac=tf, of=ofs, pc_bar=pc,
-                             thrust_N=F, isp_s=isp, separated=sep)
+        if lo > hi:
+            notes.append(
+                f"envelope skipped: requested O/F [{s.of_range[0]:g}, {s.of_range[1]:g}] "
+                f"is disjoint from the O/F table [{of_lo:g}, {of_hi:g}]"
+            )
+            ofs = None
+        else:
+            if (lo, hi) != tuple(s.of_range):
+                notes.append(f"envelope clipped to O/F table: [{lo:g}, {hi:g}]")
+            ofs = np.linspace(lo, hi, s.n[1])
+        if ofs is not None:
+            shape = (len(ofs), len(tf))
+            pc = np.zeros(shape); F = np.zeros(shape)
+            isp = np.zeros(shape); sep = np.zeros(shape, dtype=bool)
+            for i, o in enumerate(ofs):
+                for j, f in enumerate(tf):
+                    mdot = f * tc.mdot_total_kg_s
+                    p = ev(mdot * o / (1 + o), mdot / (1 + o))
+                    pc[i, j], F[i, j] = p["pc_bar"], p["thrust_N"]
+                    isp[i, j], sep[i, j] = p["isp_s"], p["separated"]
+            env = EnvelopeResult(throttle_frac=tf, of=ofs, pc_bar=pc,
+                                 thrust_N=F, isp_s=isp, separated=sep)
 
     return OffDesignResult(ox_throttle=ox_sweep, of_sweep=of_sweep,
                            envelope=env, notes=tuple(notes))

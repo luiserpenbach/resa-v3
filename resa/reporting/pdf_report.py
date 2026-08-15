@@ -27,6 +27,23 @@ from ..results import EngineResult
 from . import pdf_plots
 
 
+def _esc(text: object) -> str:
+    """Escape text for reportlab Paragraph (XML)."""
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _para(text: object, style, *, br: bool = False) -> Paragraph:
+    body = _esc(text)
+    if br:
+        body = body.replace("\n", "<br/>")
+    return Paragraph(body, style)
+
+
 def _styles():
     base = getSampleStyleSheet()
     return {
@@ -256,6 +273,13 @@ def _uncertainty_section(story, styles, res: EngineResult) -> None:
         rows.append([label, fmt.format(lo), fmt.format(nom), fmt.format(hi)])
     if len(rows) > 1:
         story.append(_table(rows, col_widths=[40 * mm, 40 * mm, 40 * mm, 40 * mm]))
+        if res.mode == "design":
+            story.append(Paragraph(
+                "Design-mode eta_c* bounds re-size the engine (same thrust/Pc "
+                "targets). Off-design bands keep the nominal geometry and only "
+                "vary eta_c*.",
+                styles["small"],
+            ))
         story.append(Spacer(1, 6 * mm))
 
 
@@ -317,6 +341,22 @@ def _regen_section(story, styles, res: EngineResult, cfg: EngineConfig) -> None:
     story.append(Spacer(1, 6 * mm))
 
 
+def _film_section(story, styles, res: EngineResult) -> None:
+    film = res.film
+    if film is None:
+        return
+    story.append(Paragraph("Film cooling (first-order)", styles["h1"]))
+    story.append(_kv_table([
+        ("Side / fraction", f"{film.side} / {film.fraction:.3f}"),
+        ("O/F overall → core", f"{film.of_overall:.3f} → {film.of_core:.3f}"),
+        ("Film mass flow", f"{film.mdot_film_kg_s * 1e3:.1f} g/s"),
+        ("Tank-side total", f"{film.mdot_total_kg_s * 1e3:.1f} g/s"),
+        ("Isp core / delivered",
+         f"{film.isp_core_s:.2f} / {film.isp_delivered_s:.2f} s"),
+    ]))
+    story.append(Spacer(1, 6 * mm))
+
+
 def _config_appendix(story, styles, cfg_yaml: str) -> None:
     story.append(Paragraph("Appendix — resolved configuration", styles["h1"]))
     story.append(Paragraph(
@@ -328,7 +368,7 @@ def _config_appendix(story, styles, cfg_yaml: str) -> None:
     lines = cfg_yaml.rstrip().splitlines()
     chunk = []
     for line in lines:
-        chunk.append(line)
+        chunk.append(_esc(line))
         if len(chunk) >= 55:
             story.append(Paragraph("<br/>".join(chunk), styles["small"]))
             story.append(Spacer(1, 2 * mm))
@@ -351,12 +391,12 @@ def write_pdf_report(
     story = []
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    story.append(Paragraph(f"{res.engine}", styles["title"]))
+    story.append(_para(res.engine, styles["title"]))
     story.append(Paragraph(
-        f"{res.mode.upper()} mode analysis report<br/>"
-        f"config hash: {res.config_hash}<br/>"
-        f"config: {Path(cfg_path).as_posix()}<br/>"
-        f"generated: {ts}",
+        f"{_esc(res.mode.upper())} mode analysis report<br/>"
+        f"config hash: {_esc(res.config_hash)}<br/>"
+        f"config: {_esc(Path(cfg_path).as_posix())}<br/>"
+        f"generated: {_esc(ts)}",
         styles["subtitle"],
     ))
     story.append(Spacer(1, 4 * mm))
@@ -364,13 +404,14 @@ def write_pdf_report(
     if res.warnings:
         story.append(Paragraph("Warnings", styles["h1"]))
         for w in res.warnings:
-            story.append(Paragraph(f"• {w}", styles["warn"]))
+            story.append(_para(f"• {w}", styles["warn"]))
         story.append(Spacer(1, 6 * mm))
 
     _summary_section(story, styles, res)
     _inputs_section(story, styles, cfg)
     _combustion_section(story, styles, res)
     _uncertainty_section(story, styles, res)
+    _film_section(story, styles, res)
     _offdesign_summary(story, styles, res)
     _regen_section(story, styles, res, cfg)
 

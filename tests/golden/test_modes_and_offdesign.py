@@ -72,6 +72,28 @@ def test_of_sweep_constant_mdot(design):
     assert 4.0 <= s.of[i] <= 5.5
 
 
+def test_disjoint_of_sweep_is_skipped_not_crashed(design):
+    """A sweep range wholly outside the combustion table must not crash."""
+    from resa.config.schema import EnvelopeSweep, OfSweep, OffDesignConfig
+    from resa.models.offdesign import run as od_run
+    from resa.properties.combustion import build_model
+    from resa.config.loader import load_config
+
+    cfg = load_config(CI_E2_DESIGN)
+    model = build_model(cfg.propellants, cfg.combustion)
+    of_lo, of_hi = model.of_range
+    od = OffDesignConfig(
+        of_sweep=OfSweep(of_range=(of_hi + 2.0, of_hi + 4.0), n=8),
+        envelope=EnvelopeSweep(
+            of_range=(of_lo - 4.0, of_lo - 1.0), n=(6, 6),
+        ),
+    )
+    result = od_run(od, design.thrust_chamber, model, 1.01325)
+    assert result.of_sweep is None
+    assert result.envelope is None
+    assert any("disjoint" in n for n in result.notes)
+
+
 def test_envelope_shape(design):
     e = design.offdesign.envelope
     assert e.isp_s.shape == (len(e.of), len(e.throttle_frac))

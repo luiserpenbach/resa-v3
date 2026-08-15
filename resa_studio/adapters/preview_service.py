@@ -1,6 +1,7 @@
 """Live geometry previews for the design workspace (contour, cooling layout, export)."""
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Literal
@@ -250,7 +251,9 @@ def export_channel(
         raise ValueError(f"channel_id must be 0..{lay.N - 1}")
     tag = cfg.engine.replace(" ", "_")
     ext = fmt
-    path = Path(tempfile.gettempdir()) / f"{tag}_channel_{channel_id:02d}_mm.{ext}"
+    fd, tmp = tempfile.mkstemp(suffix=f".{ext}", prefix=f"{tag}_ch{channel_id:02d}_")
+    os.close(fd)
+    path = Path(tmp)
     if fmt == "stl":
         verts, faces, _ = build_channel_mesh(lay, [channel_id])
         write_binary_stl(str(path), verts, faces)

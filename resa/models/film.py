@@ -102,12 +102,12 @@ def build_result(
     mdot_film = f * mdot_total_kg_s
     isp_delivered = tc_core.thrust_N / (mdot_total_kg_s * _G0)
     return FilmCoolingResult(
-        fraction=f,
+        fraction=float(f),
         side=film.side,
-        of_overall=round(of_overall, 4),
-        of_core=round(tc_core.of_ratio, 4),
-        mdot_film_kg_s=round(mdot_film, 6),
-        mdot_total_kg_s=round(mdot_total_kg_s, 6),
-        isp_core_s=round(tc_core.isp_s, 2),
-        isp_delivered_s=round(isp_delivered, 2),
+        of_overall=round(float(of_overall), 4),
+        of_core=round(float(tc_core.of_ratio), 4),
+        mdot_film_kg_s=round(float(mdot_film), 6),
+        mdot_total_kg_s=round(float(mdot_total_kg_s), 6),
+        isp_core_s=round(float(tc_core.isp_s), 2),
+        isp_delivered_s=round(float(isp_delivered), 2),
     )

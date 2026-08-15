@@ -27,5 +27,7 @@ def run_campaign(body: CampaignRunBody) -> dict[str, Any]:
         return _campaigns.run(body.campaign_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

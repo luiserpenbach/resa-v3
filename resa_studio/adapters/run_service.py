@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from resa.config.schema import EngineConfig
+from resa.paths import safe_run_dirname
 from resa.pipeline import run as pipeline_run
 from resa.reporting.report import write_report
 
@@ -94,7 +95,7 @@ class RunService:
     _META_FILE = "studio_meta.json"
 
     def _run_dir(self, engine: str, config_hash: str) -> Path:
-        return self.out_root / f"{engine}_{config_hash}"
+        return self.out_root / safe_run_dirname(engine, config_hash)
 
     def _read_meta(self, outdir: Path) -> dict[str, Any]:
         path = outdir / self._META_FILE
@@ -248,7 +249,10 @@ class RunService:
         }
 
     def load_existing(self, engine: str, config_hash: str) -> dict[str, Any] | None:
-        outdir = self.out_root / f"{engine}_{config_hash}"
+        try:
+            outdir = self._run_dir(engine, config_hash)
+        except ValueError:
+            return None
         results_path = outdir / "results.yaml"
         if not results_path.is_file():
             return None

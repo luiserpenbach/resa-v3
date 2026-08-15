@@ -284,6 +284,7 @@ function applyEditorPayload(data, { isRun = false } = {}) {
     writable: data.writable !== false,
     save_path: data.save_path || data.config_path || data.config_source,
     is_override: !!data.is_override,
+    file_sha256: data.file_sha256 || null,
   };
   state.editSession = {
     baseline: null,
@@ -417,7 +418,11 @@ async function saveEdit() {
     }
     const res = await api("/api/config/save", {
       method: "POST",
-      body: JSON.stringify({ config_path: savePath, config }),
+      body: JSON.stringify({
+        config_path: savePath,
+        config,
+        expected_file_sha256: state.editor.meta?.file_sha256 || null,
+      }),
     });
     sess.editing = false;
     sess.dirty = false;
