@@ -92,6 +92,25 @@ def test_film_wall_relief_in_regen():
     assert float(wet.T_wall_hot_K.max()) <= float(dry.T_wall_hot_K.max()) + 1e-6
 
 
+def test_film_survives_report_write(tmp_path):
+    """Film bookkeeping must land in results.yaml even when regen also runs."""
+    pytest.importorskip("plotly")
+    from resa.reporting.report import _results_dict, write_report
+
+    cfg = _cfg(CI_REGEN, film={"fraction": 0.04, "side": "fuel"})
+    res = run(cfg)
+    assert res.film is not None
+
+    outdir, written = write_report(res, cfg, "film.yaml", out_root=tmp_path)
+    assert written.film is not None
+    dumped = _results_dict(written)
+    assert dumped["film"]["of_core"] == written.film.of_core
+    yaml_text = (outdir / "results.yaml").read_text(encoding="utf-8")
+    assert "film:" in yaml_text
+    md = (outdir / "report.md").read_text(encoding="utf-8")
+    assert "Film cooling" in md
+
+
 def test_film_validation():
     # fraction cannot exceed the donating side's share of total flow
     with pytest.raises(Exception, match="exceeds the fuel fraction"):

@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ValidationError
 
-from resa_studio.adapters.config_service import ConfigService
+from resa_studio.adapters.config_service import ConfigConflictError, ConfigService
 
 router = APIRouter(prefix="/config", tags=["config"])
 _configs = ConfigService()
@@ -31,6 +31,7 @@ class ConfigValidateResponse(BaseModel):
 class ConfigSaveRequest(BaseModel):
     config_path: str
     config: dict[str, Any]
+    expected_file_sha256: str | None = None
 
 
 class ConfigSaveResponse(BaseModel):
@@ -40,6 +41,7 @@ class ConfigSaveResponse(BaseModel):
     engine: str
     mode: str
     config_hash: str
+    file_sha256: str | None = None
     created_override: bool = False
 
 
@@ -114,9 +116,15 @@ def validate_dict(body: ConfigDictRequest) -> ConfigValidateResponse:
 @router.post("/save", response_model=ConfigSaveResponse)
 def save_config(body: ConfigSaveRequest) -> ConfigSaveResponse:
     try:
-        out = _configs.save_config(body.config_path, body.config)
+        out = _configs.save_config(
+            body.config_path,
+            body.config,
+            expected_file_sha256=body.expected_file_sha256,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValidationError as exc:

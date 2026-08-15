@@ -255,6 +255,7 @@
         writable: !!payload.writable,
         save_path: payload.save_path || payload.config_path,
         is_override: !!payload.is_override,
+        file_sha256: payload.file_sha256 || null,
       };
       this.validationState = { ok: null, message: "—" };
       this._render();
@@ -273,6 +274,7 @@
         writable: true,
         save_path: configPath,
         is_override: false,
+        file_sha256: null,
       };
       this.validationState = { ok: false, message };
       this.container.innerHTML = `

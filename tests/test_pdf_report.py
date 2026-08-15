@@ -25,6 +25,19 @@ def test_pdf_report_generated(tmp_path, _pdf_deps):
     assert res.regen is not None
 
 
+def test_pdf_escapes_markup_in_warnings(tmp_path, _pdf_deps):
+    """A '<' in a warning or engine-adjacent string must not abort the PDF."""
+    from dataclasses import replace
+
+    from resa.reporting.pdf_report import write_pdf_report
+
+    cfg = load_config("configs/ci/e2_c1_design.yaml")
+    res = run(cfg)
+    res = replace(res, warnings=res.warnings + ("check a < b and x > y",))
+    write_pdf_report(res, cfg, "configs/ci/e2_c1_design.yaml", tmp_path)
+    assert (tmp_path / "report.pdf").is_file()
+
+
 def test_envelope_heatmap_orientation(_pdf_deps, monkeypatch):
     """imshow must receive isp_s as (n_of, n_t) — rows = O/F = y axis."""
     import matplotlib.axes

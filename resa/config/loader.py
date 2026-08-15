@@ -40,6 +40,8 @@ def _load_raw(path: Path, _visited: frozenset[Path] | None = None) -> dict[str, 
 
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
+    if not isinstance(raw, dict):
+        raise ValueError(f"config is empty or not a mapping: {path}")
     base_ref = raw.pop("base", None)
     raw = _resolve_refs(raw, path.parent)
     if base_ref is not None:
@@ -56,7 +58,10 @@ def _resolve_refs(data: dict[str, Any], base: Path) -> dict[str, Any]:
         if isinstance(val, str) and val.endswith((".yaml", ".yml")):
             ref_path = (base / val).resolve()
             with ref_path.open(encoding="utf-8") as f:
-                out[key] = yaml.safe_load(f)
+                loaded = yaml.safe_load(f)
+            if not isinstance(loaded, dict):
+                raise ValueError(f"file ref {val!r} is empty or not a mapping")
+            out[key] = loaded
     return out
 
 

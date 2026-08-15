@@ -16,13 +16,14 @@ optimized — so an assumption can never masquerade as a result.
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
 import yaml
 
 from ..config.schema import EngineConfig
+from ..paths import safe_run_dirname
 from ..regen.integration import run_regen_for_engine
 from ..results import EngineResult, offdesign_to_dict
 
@@ -68,6 +69,8 @@ def _results_dict(res: EngineResult) -> dict:
         }
     if res.offdesign is not None:
         d["offdesign"] = offdesign_to_dict(res.offdesign)
+    if res.film is not None:
+        d["film"] = res.film.summary()
     if res.regen is not None:
         d["regen"] = res.regen.summary()
     return d
@@ -144,6 +147,22 @@ def _write_report_md(res: EngineResult, cfg: EngineConfig, cfg_yaml: str,
                 fmt = "{:.1f}"
             L.append(f"| {label} | {fmt.format(lo)} | {fmt.format(nom)} | "
                      f"{fmt.format(hi)} |")
+        if res.mode == "design":
+            L.append(
+                "\nDesign-mode η_c* bounds **re-size** the engine (same thrust/Pc "
+                "targets). Off-design bands keep the **nominal geometry** and only "
+                "vary η_c*. Analyze-mode bounds are fixed-geometry throughout.\n"
+            )
+
+    film = res.film
+    if film is not None:
+        L.append("\n## Film cooling (first-order)\n")
+        L.append(f"- **Side / fraction**: {film.side} / {film.fraction:.3f}")
+        L.append(f"- **O/F overall → core**: {film.of_overall:.3f} → {film.of_core:.3f}")
+        L.append(f"- **Film ṁ**: {film.mdot_film_kg_s*1e3:.1f} g/s "
+                 f"(tank total {film.mdot_total_kg_s*1e3:.1f} g/s)")
+        L.append(f"- **Isp core / delivered**: {film.isp_core_s:.2f} / "
+                 f"{film.isp_delivered_s:.2f} s")
 
     od = res.offdesign
     if od is not None:
@@ -203,19 +222,13 @@ def write_report(
             "writing reports needs plotly — pip install plotly"
         ) from e
     out_root = Path(out_root)
-    outdir = out_root / f"{res.engine}_{res.config_hash}"
+    outdir = out_root / safe_run_dirname(res.engine, res.config_hash)
     outdir.mkdir(parents=True, exist_ok=True)
 
     if cfg.regen is not None and res.contour is not None:
         regen = run_regen_for_engine(
             cfg, res.thrust_chamber, res.combustion, res.contour, outdir)
-        res = EngineResult(
-            engine=res.engine, config_hash=res.config_hash, mode=res.mode,
-            combustion=res.combustion, thrust_chamber=res.thrust_chamber,
-            contour=res.contour, offdesign=res.offdesign,
-            uncertainty=res.uncertainty, regen=regen,
-            warnings=res.warnings + regen.warnings,
-        )
+        res = replace(res, regen=regen, warnings=res.warnings + regen.warnings)
 
     (outdir / "results.yaml").write_text(
         yaml.safe_dump(_results_dict(res), sort_keys=False,

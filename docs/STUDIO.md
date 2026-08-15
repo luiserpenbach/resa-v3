@@ -88,7 +88,7 @@ while editing.
 | GET | `/api/projects/list` | All projects with nested configs |
 | POST | `/api/projects/create` | New project folder + `<slug>.yaml` starter config |
 | POST | `/api/projects/{slug}/configs` | New config in a project |
-| POST | `/api/config/save` | Save edits to the file being edited (diffed against the `base:` config and fragment refs preserved when set) |
+| POST | `/api/config/save` | Save edits to the file being edited (diffed against the `base:` config and fragment refs preserved when set). Send `expected_file_sha256` from `/resolve` to reject concurrent overwrites (HTTP 409). |
 | POST | `/api/runs/fast` | Fast pipeline (no disk write) |
 | POST | `/api/runs/full` | Full report folder |
 | GET | `/api/runs` | List saved runs (KPIs, labels, baseline flag) |
@@ -101,7 +101,7 @@ while editing.
 | POST | `/api/compare/runs` | Diff two saved runs |
 | POST | `/api/compare/configs` | Diff two config dicts |
 | GET | `/api/campaigns/list` | Campaign YAML index |
-| POST | `/api/campaigns/run` | Execute a campaign |
+| POST | `/api/campaigns/run` | Execute a campaign YAML under `campaigns/` (writes to `out/<campaign-output>/`, not the shared run root) |
 | GET | `/api/artifacts/{engine}/{hash}/{path}` | Serve report file |
 
 ## Tests

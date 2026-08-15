@@ -22,6 +22,11 @@ def _config_stem(name: str) -> str:
     return stem
 
 
+def _engine_id(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name.strip()).strip("-")
+    return (cleaned or "ENGINE").upper()[:64]
+
+
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip()).strip("-").lower()
     if not slug or not _SLUG_RE.match(slug):
@@ -59,12 +64,24 @@ def _primary_config_filename(project_dir: Path, slug: str | None = None) -> str:
     return f"{slug or project_dir.name}.yaml"
 
 
+def _is_engine_config_file(path: Path) -> bool:
+    """Fragments (prop/chamber/cooling/regen) are not openable engine configs."""
+    try:
+        with path.open(encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(raw, dict) and ("engine" in raw or "base" in raw)
+
+
 def _config_entries(project_dir: Path, repo_root: Path) -> list[dict[str, str]]:
     slug = project_dir.name
     primary = _primary_config_filename(project_dir, slug)
     items: list[dict[str, str]] = []
     for path in sorted(project_dir.glob("*.yaml")):
         if path.name in _RESERVED_CONFIG_NAMES:
+            continue
+        if not _is_engine_config_file(path):
             continue
         rel = _rel(path, repo_root)
         items.append({
@@ -201,7 +218,7 @@ class ProjectService:
             raise ValueError(f"project already exists: {project_slug}")
 
         project_dir.mkdir(parents=True)
-        engine_name = engine or name.strip().upper().replace(" ", "-")[:32] or project_slug.upper()
+        engine_name = _engine_id(engine or name) or project_slug.upper()
         primary_name = f"{project_slug}.yaml"
         meta = {
             "name": name.strip(),
@@ -247,7 +264,7 @@ class ProjectService:
             raise ValueError(f"config already exists: {stem}.yaml")
 
         meta = _read_project_meta(project_dir)
-        engine_name = engine or meta.get("name") or slug
+        engine_name = _engine_id(engine or meta.get("name") or slug)
         primary_name = _primary_config_filename(project_dir, slug)
 
         if mode == "analyze":
@@ -256,11 +273,11 @@ class ProjectService:
                 raise ValueError(f"analyze config requires primary config {primary_name} in the project")
             body = _ANALYZE_TEMPLATE.format(
                 base_config=primary_name,
-                engine=f"{engine_name}-{stem}".upper(),
+                engine=_engine_id(f"{engine_name}-{stem}"),
             )
         else:
             body = _DESIGN_TEMPLATE.format(
-                engine=f"{engine_name}-{stem}".upper(),
+                engine=_engine_id(f"{engine_name}-{stem}"),
                 description=f"{meta.get('name', slug)} — {stem}",
             )
 

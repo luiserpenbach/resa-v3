@@ -22,6 +22,14 @@ from resa.config.schema import EngineConfig
 from ..settings import CONFIGS_ROOT, OUT_ROOT, PROJECTS_ROOT, REPO_ROOT, rel_to
 
 
+class ConfigConflictError(ValueError):
+    """On-disk file changed since the editor loaded it."""
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _config_hash(data: dict[str, Any]) -> str:
     blob = json.dumps(data, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:12]
@@ -191,10 +199,17 @@ class ConfigService:
             "engine": cfg.engine,
             "mode": cfg.mode,
             "config_hash": cfg.config_hash,
+            "file_sha256": _file_sha256(path),
             **info,
         }
 
-    def save_config(self, config_path: str, data: dict[str, Any]) -> dict[str, Any]:
+    def save_config(
+        self,
+        config_path: str,
+        data: dict[str, Any],
+        *,
+        expected_file_sha256: str | None = None,
+    ) -> dict[str, Any]:
         """Validate and write config to the file being edited."""
         source = self._resolve_path(config_path)
         rel = self._rel(source)
@@ -203,6 +218,12 @@ class ConfigService:
         info = self._path_info(source)
         if not info["writable"]:
             raise ValueError(f"config path is not writable: {self._rel(source)}")
+        if expected_file_sha256:
+            current = _file_sha256(source)
+            if current != expected_file_sha256:
+                raise ConfigConflictError(
+                    "config changed on disk since it was loaded — reload and save again"
+                )
         cfg = self.validate_dict(data)
         payload = _build_save_payload(source, data)
         source.parent.mkdir(parents=True, exist_ok=True)
@@ -217,6 +238,7 @@ class ConfigService:
             "engine": cfg.engine,
             "mode": cfg.mode,
             "config_hash": cfg.config_hash,
+            "file_sha256": _file_sha256(source),
             "created_override": False,
         }
 

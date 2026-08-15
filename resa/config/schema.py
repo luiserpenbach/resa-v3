@@ -15,6 +15,7 @@ from typing import Literal, Optional, Union
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from ..paths import ENGINE_NAME_RE
 from ..regen_channels.config import RegenConfig
 
 
@@ -153,10 +154,21 @@ class AnalyzePoint(StrictModel):
 # --------------------------------------------------------------------------- #
 # Off-design / throttle sweeps (run around the nominal point, fixed geometry)
 # --------------------------------------------------------------------------- #
+def _range_lo_hi(pair: tuple[float, float], name: str) -> tuple[float, float]:
+    if pair[0] >= pair[1]:
+        raise ValueError(f"{name} needs lo < hi (got {pair[0]:g} >= {pair[1]:g})")
+    return pair
+
+
 class OxThrottleSweep(StrictModel):
     """Vary ox flow, fuel constant (E2-style single-side throttling)."""
     ox_fraction: tuple[float, float] = (0.5, 1.15)   # × nominal mdot_ox
     n: int = Field(default=25, ge=5)
+
+    @field_validator("ox_fraction")
+    @classmethod
+    def _ox_frac(cls, v: tuple[float, float]) -> tuple[float, float]:
+        return _range_lo_hi(v, "ox_throttle.ox_fraction")
 
 
 class OfSweep(StrictModel):
@@ -164,12 +176,27 @@ class OfSweep(StrictModel):
     of_range: tuple[float, float]
     n: int = Field(default=30, ge=5)
 
+    @field_validator("of_range")
+    @classmethod
+    def _of_range(cls, v: tuple[float, float]) -> tuple[float, float]:
+        return _range_lo_hi(v, "of_sweep.of_range")
+
 
 class EnvelopeSweep(StrictModel):
     """2-D grid: total-flow throttle fraction × O/F."""
     throttle_fraction: tuple[float, float] = (0.6, 1.15)  # × nominal mdot_total
     of_range: tuple[float, float] = (3.5, 7.0)
     n: tuple[int, int] = (20, 20)                          # (throttle, of)
+
+    @field_validator("throttle_fraction")
+    @classmethod
+    def _tf(cls, v: tuple[float, float]) -> tuple[float, float]:
+        return _range_lo_hi(v, "envelope.throttle_fraction")
+
+    @field_validator("of_range")
+    @classmethod
+    def _of_range(cls, v: tuple[float, float]) -> tuple[float, float]:
+        return _range_lo_hi(v, "envelope.of_range")
 
 
 class OffDesignConfig(StrictModel):
@@ -248,7 +275,7 @@ class FilmCoolingConfig(StrictModel):
 # Top-level engine config
 # --------------------------------------------------------------------------- #
 class EngineConfig(StrictModel):
-    engine: str
+    engine: str = Field(pattern=ENGINE_NAME_RE.pattern)
     description: str = ""                    # human-readable design note (studio / docs)
     propellants: PropellantConfig
     combustion: CombustionConfig

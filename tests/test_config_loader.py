@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from resa.config.loader import load_config
-from resa.config.schema import ChamberConfig
+from resa.config.loader import load_config, load_resolved_dict
+from resa.config.schema import ChamberConfig, EngineConfig
 
 
 def test_moc_contour_rejected_at_validation() -> None:
@@ -16,6 +16,20 @@ def test_moc_contour_rejected_at_validation() -> None:
             "l_star_m": 1.0,
             "contour": "moc",
         })
+
+
+def test_empty_yaml_is_a_clear_error(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="empty or not a mapping"):
+        load_config(empty)
+
+
+def test_engine_name_rejects_path_traversal() -> None:
+    data = load_resolved_dict("configs/ci/e2_c1_design.yaml")
+    data["engine"] = "../tmp/evil"
+    with pytest.raises(Exception, match="engine"):
+        EngineConfig.model_validate(data)
 
 
 def test_circular_base_inheritance_detected(tmp_path: Path) -> None:

@@ -73,6 +73,8 @@ def export_artifacts(
             files.append(str(f))
         except ImportError:
             warnings.append("regen: STEP export skipped — pip install cadquery-ocp")
+        except RuntimeError as exc:
+            warnings.append(f"regen: STEP export skipped — {exc}")
     if e.html_3d:
         from .viz import figure_3d
         ids = e.channel_ids(lay, "html_3d_channels")

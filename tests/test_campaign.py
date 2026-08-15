@@ -102,6 +102,50 @@ def test_sweep_requires_base():
         _P(p).unlink()
 
 
+def test_diff_output_rejects_parent_escape(tmp_path):
+    camp = tmp_path / "bad.yaml"
+    repo = Path(".").resolve()
+    camp.write_text(
+        f"""
+name: escape
+output: out
+configs:
+  - {repo}/configs/ci/e2_c1_design.yaml
+  - {repo}/configs/ci/ex15_design.yaml
+diffs:
+  - a: {repo}/configs/ci/e2_c1_design.yaml
+    b: {repo}/configs/ci/ex15_design.yaml
+    output: ../escaped.txt
+""",
+        encoding="utf-8",
+    )
+    pytest.importorskip("plotly")
+    with pytest.raises(ValueError, match="relative"):
+        run_campaign(camp, out_root=tmp_path / "out", verbose=False)
+
+
+def test_diff_output_creates_parent_dirs(tmp_path):
+    camp = tmp_path / "nested.yaml"
+    repo = Path(".").resolve()
+    camp.write_text(
+        f"""
+name: nested
+output: out
+configs:
+  - {repo}/configs/ci/e2_c1_design.yaml
+  - {repo}/configs/ci/ex15_design.yaml
+diffs:
+  - a: {repo}/configs/ci/e2_c1_design.yaml
+    b: {repo}/configs/ci/ex15_design.yaml
+    output: diffs/asbuilt.md
+""",
+        encoding="utf-8",
+    )
+    pytest.importorskip("plotly")
+    out = run_campaign(camp, out_root=tmp_path / "out", verbose=False)
+    assert (out / "diffs" / "asbuilt.md").is_file()
+
+
 def test_run_ci_campaign(tmp_path):
     pytest.importorskip("plotly")
     out = run_campaign("campaigns/ci_golden.yaml", out_root=tmp_path, verbose=False)

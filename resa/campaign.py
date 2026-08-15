@@ -22,6 +22,7 @@ import yaml
 
 from .config.loader import load_config, load_resolved_dict
 from .config.schema import EngineConfig
+from .paths import confined_relative
 from .pipeline import run
 from .regen.integration import contour_from_resa, prepare_regen_config
 from .regen_channels.diff import figure_diff
@@ -334,7 +335,7 @@ def run_campaign(
                 f"diff {diff.output!r} references configs not in campaign "
                 f"configs list: {diff.a!r}, {diff.b!r}")
         text = diff_folders(outdirs[diff.a], outdirs[diff.b])
-        out_path = out_root / diff.output
+        out_path = confined_relative(diff.output, out_root)
         out_path.write_text(text, encoding="utf-8")
         if verbose:
             print(f"diff   -> {out_path}")
@@ -346,7 +347,7 @@ def run_campaign(
             raise ValueError(
                 f"regen_diff {diff.output!r} references configs not in campaign "
                 f"configs list")
-        out_path = out_root / diff.output
+        out_path = confined_relative(diff.output, out_root)
         note = _regen_diff_html(diff.a, diff.b, results[diff.a], results[diff.b], out_path)
         if note:
             if verbose:

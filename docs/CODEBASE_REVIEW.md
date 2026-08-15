@@ -1,20 +1,16 @@
 # RESA v3 — Codebase Analysis & Review
 
-> **Status:** the recommended priorities in §7 have been implemented on this
-> branch (see the commit series following this document): E2-1A file refs
-> restored, overlay-save data-loss bugs fixed, contour feasibility guards +
-> `n_stations` honored, regen biases and the energy-closure diagnostic fixed,
-> PDF envelope orientation fixed, frontend canvas/XSS/leak fixes and dead-code
-> removal, strict regen schema, CORS restricted, tests green (90 passed).
-> A follow-up batch also fixed the preview-cache timestamp/thundering-herd
-> behavior and the `RESA_*_ROOT` env overrides outside the repo root (plus
-> the prefix-containment checks).
-> Items NOT addressed (still open, lower priority): campaign-service path
-> confinement and artifact listing, save comment destruction / concurrency
-> guard, disjoint off-design sweep ranges, design-mode uncertainty-band
-> semantics, `cooling.correlation`/`mdot_coolant_kg_s` schema fields (kept
-> for compatibility; still unused), and the remaining §5 low items not
-> listed above.
+> **Status:** the recommended priorities in §7 have been implemented, plus a
+> deploy-prep pass for internal Studio use: campaign-path confinement and
+> isolated campaign artifact dirs, save concurrency (`file_sha256` / 409),
+> disjoint off-design sweeps skipped instead of crashing, empty-YAML errors,
+> PDF Paragraph escaping, film results persisted through reports, engine-name
+> path safety, fragment YAMLs hidden from the project list, STEP RuntimeError
+> no longer aborts a report, and design-mode uncertainty semantics documented
+> in the report. Still open (non-blocking): save comment preservation
+> (`yaml.safe_dump` still strips comments), unused
+> `cooling.correlation` / `mdot_coolant_kg_s` compatibility fields, and the
+> remaining §5 low items not listed above.
 
 Deep review of bugs, workflow errors, unused code, and feature effectiveness,
 covering the core physics (`resa/models`, `resa/properties`, `resa/pipeline.py`),
