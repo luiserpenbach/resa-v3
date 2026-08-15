@@ -750,8 +750,8 @@
     const card = document.createElement("section");
     card.className = "config-section regen-design-section form-section regen-enable-card";
     card.innerHTML = `
-      <h3 class="form-section-title">Regen cooling circuit</h3>
-      <p class="form-section-hint">Enable axial regen channel layout for partial or full-chamber coverage. Multiple circuits per engine are planned — start with circuit 1.</p>
+      <h3 class="form-section-title">Regen circuit</h3>
+      <p class="form-section-hint">Axial channels on the chamber contour.</p>
     `;
     const btn = document.createElement("button");
     btn.type = "button";
@@ -803,8 +803,8 @@
     const ch = regen.channels || {};
     const body = addSection(
       editor._regenFormRoot,
-      "1 · Regen circuit",
-      "Define channel count and axial extent on the chamber contour (x = 0 at throat; chamber x < 0, nozzle x > 0). Leave start/stop blank for full coverage."
+      "Circuit",
+      "Channel count and axial extent. x = 0 at the throat."
     );
     const grid = document.createElement("div");
     grid.className = "form-grid";
@@ -853,8 +853,8 @@
     const cool = editor.config.cooling || {};
     const body = addSection(
       editor._regenFormRoot,
-      "2 · Coolant & mass flow",
-      "Coolant species, inlet conditions, and fraction of engine propellant flow routed through channels."
+      "Coolant",
+      "Inlet conditions and fraction of engine flow in the channels."
     );
     const grid = document.createElement("div");
     grid.className = "form-grid";
@@ -891,8 +891,8 @@
     const ch = editor.config.chamber || {};
     const body = addSection(
       editor._regenFormRoot,
-      "3 · Wall & heat transfer",
-      "Wall material limits, tube-side correlation, and hot-gas discretization."
+      "Wall",
+      "Material limit and hot-gas correlation."
     );
     const grid = document.createElement("div");
     grid.className = "form-grid";
@@ -924,8 +924,8 @@
     const helix = regen.channels?.helix || {};
     const body = addSection(
       editor._regenFormRoot,
-      "4 · Channel geometry",
-      "Defaults: constant height, constant rib width, straight axial channels. Turn off a toggle to edit that parameter axially."
+      "Channels",
+      "Constant height/rib/wall, or edit axially. Off = profile editor."
     );
 
     const toggleBar = document.createElement("div");
@@ -1028,8 +1028,8 @@
   function buildExportSection(editor) {
     const body = addSection(
       editor._regenFormRoot,
-      "Report export defaults",
-      "Settings used when running a full report. Live STL/STEP export is in section 6 below."
+      "Export",
+      "Written with a full report."
     );
     const grid = document.createElement("div");
     grid.className = "form-grid";
@@ -1045,8 +1045,8 @@
   function buildSyncSection(editor) {
     const body = addSection(
       editor._regenFormRoot,
-      "Engine sync",
-      "When enabled, values are taken from the RESA engine run instead of the regen YAML."
+      "Sync",
+      "Pull values from the engine run instead of regen YAML."
     );
     if (window.RegenEditor?.buildSyncMatrix) {
       body.appendChild(window.RegenEditor.buildSyncMatrix(editor, editor.config.regen?.sync || {}));
@@ -1057,8 +1057,8 @@
     const cool = editor.config.cooling || {};
     const body = addSection(
       editor._regenFormRoot,
-      "Throat reference (scalar)",
-      "Scalar cooling fields used until regen is enabled. These define the throat reference channel ring."
+      "Throat reference",
+      "Scalar cooling used until regen is enabled."
     );
     const grid = document.createElement("div");
     grid.className = "form-grid";

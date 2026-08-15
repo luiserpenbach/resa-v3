@@ -3,8 +3,9 @@
 Browser UI for editing engine YAML, live geometry previews, fast sizing runs,
 full reports, run comparison, and campaigns.
 
-**Layout redesign (proposal):** [STUDIO_UI.md](STUDIO_UI.md) — current stack,
-why the chrome feels crowded, and a cleaner inspector + viewport variant.
+**Layout:** inspector + viewport (see [STUDIO_UI.md](STUDIO_UI.md) for the
+design). Geometry and plots occupy the centre stage; config sits in a right
+inspector; the sidebar is projects and runs only.
 
 ## Install and launch
 
@@ -41,40 +42,48 @@ Optional extras:
 ## Layout
 
 ```
-frontend/public/     SPA (no bundler)
-resa_studio/         FastAPI app + adapters
-  api/routes/        REST endpoints
-  adapters/          config, run, preview, compare, campaign services
+┌ RESA   project / config.yaml  ·valid    [Edit] [Run ▾]
+├──────────┬──────────────────────────────┬──────────────┤
+│ Projects │  Viewport                    │ Inspector    │
+│  configs │  Geometry | Thermal | Sweeps │ Design       │
+│ Runs     │  Report   | Compare          │ Chamber      │
+│          │                              │ Regen        │
+│ Campaigns│  KPI strip (Thrust Isp Pc …) │ Off-design   │
+└──────────┴──────────────────────────────┴──────────────┘
 ```
+
+`frontend/public/` is the SPA (no bundler). `resa_studio/` is the FastAPI
+app. Live canvases mount in the centre viewport; the inspector is forms only.
 
 ## Workflow
 
 1. **Select a project** in the sidebar, then pick a config (or create a project / config with **+**).
-2. **Edit** — changes validate on blur; invalid fields are highlighted per tab.
+2. **Edit** — topbar Edit; changes validate on blur; invalid fields are highlighted per tab.
    Numeric fields nudge with **↑/↓** (one unit of the last decimal place;
-   **Shift** for 10×) and live previews follow.
-3. **Run fast** — in-memory pipeline, KPIs + off-design mini charts (no artifacts).
-4. **Full report** — writes `out/<engine>_<hash>/` with plots, PDF, CSV, regen
-   artifacts when configured.
-5. **Saved runs** — a sortable KPI table (thrust, Isp, T_wall,max, Pc, regen Δp,
-   warnings, age). Give runs a **label** (✎ on the row) and a note; shift+click
-   to pick compare A/B.
-6. **Pin a baseline** (📌) — every other run's KPIs then show **delta chips**
-   vs the baseline (green = favorable, red = unfavorable), on run detail and
-   fast-run results alike.
-7. **Campaigns** — run multi-config batches from `campaigns/*.yaml`, including
-   parametric design sweeps (`base:` + `sweep:` axes — see
-   [CONFIGURATION.md](CONFIGURATION.md)).
+   **Shift** for 10×) and live previews follow in the viewport.
+3. **Run** (default = fast) — in-memory pipeline, KPI strip + Sweeps charts (no artifacts).
+   Full report is in the Run menu — writes `out/<engine>_<hash>/`.
+4. **Viewport** — Geometry (chamber 2D/3D or cooling assembly), Thermal (T_wall vs
+   limit, linked axial station + section inset), Sweeps, Report (grouped Plotly),
+   Compare (shift+click two runs).
+5. **Saved runs** — compact list (label, age, warnings). Hover for Pin / Name.
+   Shift+click to pick compare A/B, then open the Compare viewport.
+6. **Pin a baseline** — other runs' KPIs show **delta chips** vs the baseline
+   (green = favorable, red = unfavorable).
+7. **Campaigns** — sidebar footer; run multi-config batches from `campaigns/*.yaml`.
 
-## Design workspace tabs
+**Ctrl/Cmd+Enter** runs fast. Collapse the nav or inspector from the topbar
+to give the viewport the full window.
+
+## Inspector tabs
 
 | Tab | Features |
 |-----|----------|
 | Design | Operating point, expansion mode (ε / pe / optimum) |
-| Analyze | Fixed geometry + test mass flows; contour preview |
-| Chamber | Contour & sizing with live 2D/3D preview |
-| Cooling | Channel layout, regen profile editors, sync matrix, thermal KPIs, STL/STEP export. Thermal preview leads with a **margin plot** (wall temperature vs the material limit, min-margin callout, two-phase band) and a **Fast preview / Full stations** fidelity toggle. A **wall assembly 3D view** shows the wall with integrated channels — toggle inner wall / channels / closeout, and cut away an angular sector of the closeout to expose the channel grooves |
-| Off-design | Structured sweep toggles; charts in Results after run |
+| Analyze | Fixed geometry + test mass flows |
+| Chamber | Contour & sizing; 2D/3D in the Geometry viewport |
+| Regen | Channel layout, axial profiles, sync matrix. Assembly 3D (wall / channels / closeout + cutaway) and STL/STEP in Geometry; thermal margin plot in Thermal |
+| Off-design | Sweep toggles; charts in the Sweeps viewport after run |
 
 Draft edits are auto-saved to localStorage per config path. Undo/redo works
 while editing.

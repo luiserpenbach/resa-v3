@@ -208,10 +208,8 @@ def figure_diff(la, lb, ra=None, rb=None, name_a="A", name_b="B"):
         pair(4, 2, ra.x_m.values, ra.v_m_s, rb.x_m.values, rb.v_m_s,
              "v [m/s]", "#ea580c")
     fig.update_xaxes(title_text="x [mm]", row=rows)
-    fig.update_layout(title=f"regen diff — {name_a} (solid) vs "
-                            f"{name_b} (dashed)",
-                      template="plotly_white", height=300 * rows + 120)
-    return fig
+    from resa.reporting.plotly_theme import apply_studio_theme
+    return apply_studio_theme(fig)
 
 
 # -------------------------------------------------------------------- CLI

@@ -74,7 +74,7 @@
     const canvas = document.createElement("canvas");
     canvas.className = "sweep-chart";
     canvas.id = canvasId;
-    canvas.setAttribute("height", "100");
+    canvas.setAttribute("height", "180");
     wrap.appendChild(canvas);
     requestAnimationFrame(() => drawLineChart(canvas, x, y, { label: `${yLabel} vs ${xLabel}` }));
     return wrap;
@@ -128,10 +128,8 @@
   }
 
   const REGEN_KPI_FIELDS = [
-    ["Q_total_kW", "Q total", "kW"],
     ["T_wall_max_K", "T_wall max", "K"],
-    ["dp_bar", "Δp cool", "bar"],
-    ["outlet_T_K", "T_out", "K"],
+    ["dp_bar", "Δp", "bar"],
   ];
 
   function appendRegenKpis(kpiContainer, regen) {
@@ -146,7 +144,6 @@
       card.innerHTML = `
         <div class="kpi-label">${label}</div>
         <div class="kpi-value">${esc(val)} ${unit}</div>
-        <div class="kpi-src">regen solver</div>
       `;
       kpiContainer.appendChild(card);
     }

@@ -7,6 +7,7 @@ from __future__ import annotations
 import plotly.graph_objects as go
 
 from ..results import ContourResult
+from .plotly_theme import apply_studio_theme
 
 
 def contour_figure(c: ContourResult, title: str = "") -> go.Figure:
@@ -21,14 +22,9 @@ def contour_figure(c: ContourResult, title: str = "") -> go.Figure:
                              marker=dict(color="#d62728", size=8), text=["throat"],
                              textposition="top center", name="throat"))
     fig.add_vline(x=0, line=dict(color="#d62728", width=1, dash="dot"))
-    fig.update_layout(
-        title=title or f"Contour — {c.method}",
-        xaxis_title="axial x [mm]", yaxis_title="radius [mm]",
-        template="plotly_white", width=900, height=420,
-        legend=dict(orientation="h", y=1.1),
-    )
+    fig.update_layout(xaxis_title="axial x [mm]", yaxis_title="radius [mm]")
     fig.update_yaxes(scaleanchor="x", scaleratio=1.0)
-    return fig
+    return apply_studio_theme(fig)
 
 
 def mach_figure(c: ContourResult) -> go.Figure:
@@ -41,13 +37,10 @@ def mach_figure(c: ContourResult) -> go.Figure:
                              line=dict(color="#1f77b4", width=1, dash="dot"), yaxis="y2"))
     fig.add_hline(y=1.0, line=dict(color="#d62728", width=1, dash="dash"))
     fig.update_layout(
-        title="Quasi-1D Mach distribution",
         xaxis_title="axial x [mm]", yaxis_title="Mach",
         yaxis2=dict(title="radius [mm]", overlaying="y", side="right"),
-        template="plotly_white", width=900, height=360,
-        legend=dict(orientation="h", y=1.15),
     )
-    return fig
+    return apply_studio_theme(fig)
 
 
 # ------------------------- off-design / throttle --------------------------- #
@@ -93,13 +86,10 @@ def ox_throttle_figure(s, nominal=None, band=None) -> go.Figure:
                       line=dict(color="#2ca02c", dash="dot"),
                       annotation_text="nominal")
     fig.update_layout(
-        title="Ox-only throttle (fuel constant)",
         xaxis_title="ṁ_ox [g/s]", yaxis_title="thrust [N]",
         yaxis2=dict(title="Pc [bar]", overlaying="y", side="right"),
-        template="plotly_white", width=900, height=420,
-        legend=dict(orientation="h", y=1.12),
     )
-    return fig
+    return apply_studio_theme(fig)
 
 
 def of_sweep_figure(s, nominal=None, band=None) -> go.Figure:
@@ -124,13 +114,10 @@ def of_sweep_figure(s, nominal=None, band=None) -> go.Figure:
         fig.add_vline(x=nominal.of_ratio, line=dict(color="#2ca02c", dash="dot"),
                       annotation_text="nominal")
     fig.update_layout(
-        title="O/F sweep (constant total ṁ, fixed geometry)",
         xaxis_title="O/F [-]", yaxis_title="Isp [s]",
         yaxis2=dict(title="c*_eff [m/s]", overlaying="y", side="right"),
-        template="plotly_white", width=900, height=420,
-        legend=dict(orientation="h", y=1.12),
     )
-    return fig
+    return apply_studio_theme(fig)
 
 
 def envelope_figure(e, nominal=None) -> go.Figure:
@@ -166,9 +153,6 @@ def envelope_figure(e, nominal=None) -> go.Figure:
             showlegend=False,
         ))
     fig.update_layout(
-        title=("Operating envelope — Isp heatmap, Pc contours "
-               "(blank = separation risk)"),
         xaxis_title="total-flow throttle [%]", yaxis_title="O/F [-]",
-        template="plotly_white", width=900, height=540,
     )
-    return fig
+    return apply_studio_theme(fig)

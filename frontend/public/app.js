@@ -8,8 +8,6 @@ const KPI_FIELDS = [
   ["pc_bar", "Pc", "bar", "pc_src"],
   ["of_ratio", "O/F", "", "of_src"],
   ["eps", "ε", "", "eps_src"],
-  ["mdot_kg_s", "mdot", "kg/s", null],
-  ["throat_r_mm", "Throat r", "mm", null],
 ];
 
 const PLOT_ORDER = [
@@ -18,6 +16,12 @@ const PLOT_ORDER = [
   "offdesign_ox_throttle.html",
   "offdesign_of_sweep.html",
   "offdesign_envelope.html",
+];
+
+const PLOT_GROUPS = [
+  { id: "geometry", label: "Geometry", match: (f) => /^(contour|mach)/.test(f) },
+  { id: "thermal", label: "Thermal", match: (f) => /regen|coolant|thermal|channel/.test(f) },
+  { id: "offdesign", label: "Off-design", match: (f) => f.startsWith("offdesign") },
 ];
 
 const PLOT_LABELS = {
@@ -46,6 +50,7 @@ const state = {
   compareA: null,
   compareB: null,
   plotSource: null,
+  viewportMode: "geometry",
 };
 
 const els = {
@@ -98,6 +103,22 @@ const els = {
   runMetaEditor: document.getElementById("run-meta-editor"),
   runNoteInput: document.getElementById("run-note-input"),
   btnSaveNote: document.getElementById("btn-save-note"),
+  crumbProject: document.getElementById("crumb-project"),
+  crumbConfig: document.getElementById("crumb-config"),
+  btnRunMenu: document.getElementById("btn-run-menu"),
+  runMenu: document.getElementById("run-menu"),
+  btnToggleNav: document.getElementById("btn-toggle-nav"),
+  btnToggleInspector: document.getElementById("btn-toggle-inspector"),
+  appShell: document.querySelector(".app-shell"),
+  btnCampaigns: document.getElementById("btn-campaigns"),
+  campaignsPopover: document.getElementById("campaigns-popover"),
+  btnArtifacts: document.getElementById("btn-artifacts"),
+  artifactsPopover: document.getElementById("artifacts-popover"),
+  btnKpiMore: document.getElementById("btn-kpi-more"),
+  morePopover: document.getElementById("more-popover"),
+  btnWarnings: document.getElementById("btn-warnings"),
+  warningsPopover: document.getElementById("warnings-popover"),
+  viewportModes: document.getElementById("viewport-modes"),
 };
 
 /** Escape a dynamic value before interpolating it into innerHTML. */
@@ -118,8 +139,8 @@ function applyTheme(theme) {
   localStorage.setItem(THEME_KEY, theme);
   if (els.btnTheme) {
     const next = theme === "dark" ? "light" : "dark";
-    els.btnTheme.textContent = next === "light" ? "Light" : "Dark";
     els.btnTheme.setAttribute("aria-label", `Switch to ${next} mode`);
+    els.btnTheme.title = `Switch to ${next} mode`;
   }
 }
 
@@ -246,8 +267,84 @@ function fmtNum(v, dec) {
   return v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(dec);
 }
 
+function configStem(path) {
+  return (path || "").split("/").pop() || "—";
+}
+
+function updateBreadcrumb(path) {
+  const slug = path ? projectSlugFromPath(path) : null;
+  const project = state.projects.find((p) => p.slug === slug);
+  if (els.crumbProject) {
+    els.crumbProject.textContent = project?.name || slug || "—";
+    els.crumbProject.title = path || "";
+  }
+  if (els.crumbConfig) {
+    els.crumbConfig.textContent = path ? configStem(path) : "—";
+    els.crumbConfig.title = path || "";
+  }
+  if (els.activeConfigPath) els.activeConfigPath.textContent = path || "—";
+}
+
+function setViewportMode(mode) {
+  if (!mode) return;
+  state.viewportMode = mode;
+  document.querySelectorAll(".vp-pane").forEach((el) => {
+    el.classList.toggle("hidden", el.dataset.vp !== mode);
+  });
+  document.querySelectorAll(".vp-mode").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  });
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+}
+
+function syncViewportForTab(tab) {
+  const ws = state.editor?.workspace;
+  if (tab === "cooling") {
+    ws?.setGeometryKind("cooling");
+    if (state.viewportMode === "report" || state.viewportMode === "compare") return;
+    setViewportMode(state.viewportMode === "thermal" ? "thermal" : "geometry");
+  } else if (tab === "offdesign") {
+    ws?.setGeometryKind("chamber");
+    setViewportMode("sweeps");
+  } else {
+    ws?.setGeometryKind("chamber");
+    if (state.viewportMode === "thermal") setViewportMode("geometry");
+  }
+}
+
+function closePopovers(except) {
+  for (const el of [els.runMenu, els.campaignsPopover, els.artifactsPopover, els.morePopover, els.warningsPopover]) {
+    if (el && el !== except) el.classList.add("hidden");
+  }
+  if (els.btnRunMenu) els.btnRunMenu.setAttribute("aria-expanded", "false");
+}
+
+function placePopover(pop, anchor, { preferDown = true } = {}) {
+  if (!pop || !anchor) return;
+  pop.classList.remove("hidden");
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  const h = pop.offsetHeight;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+  let top = preferDown ? r.bottom + 6 : r.top - h - 6;
+  if (top + h > window.innerHeight - 8) top = r.top - h - 6;
+  if (top < 8) top = 8;
+  pop.style.position = "fixed";
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top = `${top}px`;
+  pop.style.bottom = "auto";
+}
+
+function togglePopover(pop, anchor) {
+  if (!pop) return;
+  const open = pop.classList.contains("hidden");
+  closePopovers(open ? pop : null);
+  if (open) placePopover(pop, anchor);
+}
+
 function projectSlugFromPath(path) {
-  const m = path.match(/^configs\/projects\/([^/]+)\//);
+  const m = (path || "").match(/^configs\/projects\/([^/]+)\//);
   return m ? m[1] : null;
 }
 
@@ -268,7 +365,7 @@ function selectConfig(path) {
   if (window.StudioP2) StudioP2.touchRecent(path);
   highlightActiveRun();
   els.configPath.value = path;
-  if (els.activeConfigPath) els.activeConfigPath.textContent = path;
+  updateBreadcrumb(path);
   highlightConfigNav();
   renderSessionNavs();
   loadEditorConfig();
@@ -325,33 +422,17 @@ function updateEditUI() {
   if (els.editorCard) {
     els.editorCard.classList.toggle("is-editing", !!sess?.editing);
   }
-  if (els.editModeBadge) {
-    if (!hasConfig) {
-      els.editModeBadge.textContent = "—";
-      els.editModeBadge.className = "edit-mode-badge";
-    } else if (!sess?.writable) {
-      els.editModeBadge.textContent = "View only";
-      els.editModeBadge.className = "edit-mode-badge";
-    } else if (sess?.editing && sess.dirty) {
-      els.editModeBadge.textContent = "Unsaved changes";
-      els.editModeBadge.className = "edit-mode-badge is-dirty";
-    } else if (sess?.editing) {
-      els.editModeBadge.textContent = "Editing";
-      els.editModeBadge.className = "edit-mode-badge is-editing";
-    } else {
-      els.editModeBadge.textContent = "Viewing";
-      els.editModeBadge.className = "edit-mode-badge";
-    }
-  }
   if (els.editHint) {
-    // Run snapshots (out/**/config_resolved.yaml) report writable: false, so
-    // editing is never entered for them — the editor stays read-only.
     if (sess?.editing) {
-      els.editHint.textContent = `Changes will be saved to ${sess.savePath}.`;
+      const name = sess.savePath ? configStem(sess.savePath) : "";
+      els.editHint.textContent = sess.dirty ? `Unsaved · ${name}` : `Editing · ${name}`;
       els.editHint.classList.remove("hidden");
     } else {
       els.editHint.classList.add("hidden");
     }
+  }
+  if (els.editModeBadge) {
+    els.editModeBadge.textContent = sess?.editing ? (sess.dirty ? "Unsaved" : "Editing") : "";
   }
 }
 
@@ -437,7 +518,7 @@ async function saveEdit() {
     }
     const resolved = await api(`/api/config/resolve?config_path=${encodeURIComponent(res.config_path)}`);
     applyEditorPayload(resolved);
-    if (els.activeConfigPath) els.activeConfigPath.textContent = res.config_path;
+    updateBreadcrumb(res.config_path);
     await validateEditorConfig(state.editor.getConfig(), { silent: true });
     clearResults();
   } catch (err) {
@@ -512,7 +593,12 @@ function clearResults(message = "Run fast or a full report to see results.") {
     els.plotSourceBadge.textContent = "";
     els.plotSourceBadge.classList.add("hidden");
   }
-  els.artifactsList.innerHTML = '<p class="placeholder">No artifacts yet.</p>';
+  if (els.btnArtifacts) els.btnArtifacts.classList.add("hidden");
+  if (els.btnKpiMore) els.btnKpiMore.classList.add("hidden");
+  if (els.btnWarnings) els.btnWarnings.classList.add("hidden");
+  els.artifactsList.innerHTML = '<p class="placeholder">No files yet.</p>';
+  const compareBtn = document.querySelector('.vp-mode[data-mode="compare"]');
+  if (compareBtn && !(state.compareA && state.compareB)) compareBtn.classList.add("hidden");
 }
 
 function extractRunExtras(data) {
@@ -544,11 +630,12 @@ function renderSummary(summary, provenance, deltas = {}) {
     const value = summary[key];
     const unitStr = unit ? ` ${unit}` : "";
     const src = srcKey && summary[srcKey] ? summary[srcKey] : provenance[key.replace("_src", "")] || "";
+    const num = typeof value === "number" ? (Math.abs(value) >= 100 ? value.toFixed(1) : value.toFixed(2)) : value;
     card.innerHTML = `
       <div class="kpi-label">${label}</div>
-      <div class="kpi-value">${esc(value)}${unitStr}${deltas[key] || ""}</div>
-      ${src ? `<div class="kpi-src">${esc(src)}</div>` : ""}
+      <div class="kpi-value">${esc(num)}${unitStr}${deltas[key] || ""}</div>
     `;
+    if (src) card.title = String(src);
     els.kpis.appendChild(card);
   }
 
@@ -564,6 +651,7 @@ function renderWarnings(warnings) {
   if (!warnings || warnings.length === 0) {
     els.warnings.classList.add("hidden");
     els.warnings.innerHTML = "";
+    if (els.btnWarnings) els.btnWarnings.classList.add("hidden");
     return;
   }
   els.warnings.classList.remove("hidden");
@@ -571,6 +659,10 @@ function renderWarnings(warnings) {
     <strong>Warnings (${warnings.length})</strong>
     <ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
   `;
+  if (els.btnWarnings) {
+    els.btnWarnings.classList.remove("hidden");
+    els.btnWarnings.textContent = `${warnings.length} warning${warnings.length === 1 ? "" : "s"}`;
+  }
 }
 
 function showPlot(engine, configHash, filename) {
@@ -586,6 +678,10 @@ function showPlot(engine, configHash, filename) {
     tab.classList.toggle("plot-tab-regen", isRegen);
     tab.classList.toggle("plot-tab-offdesign", isOffdesign);
   }
+}
+
+function plotGroup(file) {
+  return PLOT_GROUPS.find((g) => g.match(file))?.id || "other";
 }
 
 function renderPlots(engine, configHash, artifacts) {
@@ -604,14 +700,22 @@ function renderPlots(engine, configHash, artifacts) {
   }
 
   els.plotTabs.classList.remove("hidden");
-  els.plotTabs.innerHTML = plots
-    .map((file) => {
-      const cls = [];
-      if (/regen/i.test(file)) cls.push("plot-tab-regen");
-      if (file.startsWith("offdesign")) cls.push("plot-tab-offdesign");
-      return `<button type="button" class="plot-tab ${cls.join(" ")}" data-file="${file}">${plotLabel(file)}</button>`;
-    })
-    .join("");
+  const grouped = {};
+  for (const file of plots) {
+    const g = plotGroup(file);
+    if (!grouped[g]) grouped[g] = [];
+    grouped[g].push(file);
+  }
+  const parts = [];
+  for (const g of [...PLOT_GROUPS, { id: "other", label: "Other" }]) {
+    const files = grouped[g.id];
+    if (!files?.length) continue;
+    parts.push(`<span class="plot-group-label">${g.label}</span>`);
+    for (const file of files) {
+      parts.push(`<button type="button" class="plot-tab" data-file="${esc(file)}">${esc(plotLabel(file))}</button>`);
+    }
+  }
+  els.plotTabs.innerHTML = parts.join("");
 
   for (const tab of els.plotTabs.querySelectorAll(".plot-tab")) {
     tab.addEventListener("click", () => showPlot(engine, configHash, tab.dataset.file));
@@ -640,7 +744,7 @@ function renderArtifacts(engine, configHash, artifacts) {
     link.href = artifactUrl(engine, configHash, file);
     const isPdf = file.endsWith(".pdf");
     link.className = `artifact-link${isPlotArtifact(file) ? " plot" : " download"}${isPdf ? " pdf" : ""}`;
-    link.textContent = isPdf ? `📄 ${file}` : file;
+    link.textContent = file;
     if (isPlotArtifact(file)) {
       link.addEventListener("click", (e) => {
         e.preventDefault();
@@ -716,7 +820,7 @@ function appendRegenDeltaChips(regen, bl) {
   const blName = baselineName(bl);
   const byLabel = {
     "T_wall max": [regen.T_wall_max_K, bl.T_wall_max_K, DELTA_SPECS.T_wall_max_K],
-    "Δp cool": [regen.dp_bar, bl.dp_regen_bar, DELTA_SPECS.dp_regen_bar],
+    "Δp": [regen.dp_bar, bl.dp_regen_bar, DELTA_SPECS.dp_regen_bar],
   };
   for (const card of els.kpis.querySelectorAll(".kpi-regen")) {
     const label = card.querySelector(".kpi-label")?.textContent;
@@ -762,7 +866,7 @@ function updatePinButton() {
   if (!saved) return;
   const pinned = isBaselineRun(data);
   btn.classList.toggle("is-pinned", pinned);
-  btn.textContent = pinned ? "📌 baseline" : "📌 pin";
+  btn.textContent = pinned ? "Baseline" : "Pin as baseline";
   btn.title = pinned
     ? "This run is the baseline — click to unpin"
     : "Pin this run as the comparison baseline";
@@ -795,12 +899,15 @@ function renderRun(data) {
     state.plotSource = "saved";
     renderPlots(data.engine, data.config_hash, data.artifacts);
     renderArtifacts(data.engine, data.config_hash, data.artifacts);
+    if (els.btnArtifacts) els.btnArtifacts.classList.toggle("hidden", !data.artifacts?.length);
+    if (els.btnKpiMore) els.btnKpiMore.classList.remove("hidden");
     highlightActiveRun();
     syncCompareSelects();
     if (els.runMetaEditor) {
       els.runMetaEditor.classList.remove("hidden");
       if (els.runNoteInput) els.runNoteInput.value = data.note || "";
     }
+    if (data.artifacts?.some(isPlotArtifact)) setViewportMode("report");
   } else if (data.mode === "fast") {
     state.activePlot = null;
     state.plotSource = "live";
@@ -811,6 +918,10 @@ function renderRun(data) {
     setPlotSourceBadge("live");
     els.artifactsList.innerHTML = '<p class="placeholder">No artifacts (fast run).</p>';
     if (els.runMetaEditor) els.runMetaEditor.classList.add("hidden");
+    if (els.btnArtifacts) els.btnArtifacts.classList.add("hidden");
+    if (els.btnKpiMore) els.btnKpiMore.classList.remove("hidden");
+    const extrasFast = extras;
+    if (extrasFast.offdesign) setViewportMode("sweeps");
   }
   updatePinButton();
 }
@@ -857,74 +968,56 @@ function setRunSort(key) {
 }
 
 function buildRunRow(run) {
-  const tr = document.createElement("tr");
-  tr.className = "run-row" + (run.is_baseline ? " is-baseline" : "");
-  tr.dataset.engine = run.engine;
-  tr.dataset.hash = run.config_hash;
-  if (run.note) tr.title = run.note;
+  const row = document.createElement("div");
+  row.className = "run-row run-row-compact" + (run.is_baseline ? " is-baseline" : "");
+  row.dataset.engine = run.engine;
+  row.dataset.hash = run.config_hash;
+  if (run.note) row.title = run.note;
 
   const key = runKey(run.engine, run.config_hash);
-  const pick = state.compareA === key ? "[A]" : state.compareB === key ? "[B]" : "";
+  const pick = state.compareA === key ? "A" : state.compareB === key ? "B" : "";
+  const warn = run.n_warnings ? ` · ${run.n_warnings}⚠` : "";
 
-  const nameTd = document.createElement("td");
-  nameTd.className = "run-name-cell";
-  nameTd.innerHTML = `
-    <div class="run-name-top">
+  row.innerHTML = `
+    <div class="run-row-main">
       <span class="run-label${run.label ? " has-label" : ""}">${esc(run.label || run.engine)}</span>
-      <span class="run-pick">${pick}</span>
-      ${run.is_baseline ? '<span class="baseline-badge">baseline</span>' : ""}
+      <div class="run-sub">${esc(run.engine)} · ${esc(run.config_hash.slice(0, 8))}${warn}</div>
     </div>
-    <div class="run-sub">${esc(run.engine)} · ${esc(run.config_hash.slice(0, 8))}</div>
+    <span class="run-pick">${pick}</span>
+    ${run.is_baseline ? '<span class="baseline-badge">base</span>' : ""}
+    <span class="run-row-age" title="${esc(formatRunTime(run.modified_at))}">${esc(formatAge(run.modified_at))}</span>
   `;
 
-  const top = nameTd.querySelector(".run-name-top");
-  const editBtn = document.createElement("button");
-  editBtn.type = "button";
-  editBtn.className = "btn-row-act";
-  editBtn.textContent = "✎";
-  editBtn.title = "Edit label";
-  editBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    startLabelEdit(run, tr);
-  });
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
   pinBtn.className = "btn-row-act btn-row-pin" + (run.is_baseline ? " is-pinned" : "");
-  pinBtn.textContent = "📌";
+  pinBtn.textContent = "Pin";
   pinBtn.title = run.is_baseline ? "Unpin baseline" : "Pin as baseline";
   pinBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     toggleBaseline(run.engine, run.config_hash)
       .catch((err) => console.error("Baseline toggle failed:", err));
   });
-  top.appendChild(editBtn);
-  top.appendChild(pinBtn);
-  tr.appendChild(nameTd);
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "btn-row-act";
+  editBtn.textContent = "Name";
+  editBtn.title = "Edit label";
+  editBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    startLabelEdit(run, row);
+  });
+  row.appendChild(editBtn);
+  row.appendChild(pinBtn);
 
-  for (const col of RUN_COLUMNS.slice(1)) {
-    const td = document.createElement("td");
-    td.className = "num";
-    if (col.key === "modified_at") {
-      td.textContent = formatAge(run.modified_at);
-      td.title = formatRunTime(run.modified_at);
-    } else if (col.key === "n_warnings") {
-      const n = run.n_warnings || 0;
-      td.textContent = String(n);
-      if (n > 0) td.classList.add("run-warn-some");
-    } else {
-      td.textContent = fmtNum(run[col.key], col.dec);
-    }
-    tr.appendChild(td);
-  }
-
-  tr.addEventListener("click", (e) => {
+  row.addEventListener("click", (e) => {
     if (e.shiftKey) {
       pickCompareRun(run.engine, run.config_hash);
       return;
     }
     openRun(run.engine, run.config_hash);
   });
-  return tr;
+  return row;
 }
 
 function renderRunsTable() {
@@ -932,34 +1025,10 @@ function renderRunsTable() {
     els.runsList.innerHTML = '<p class="placeholder">No saved runs yet.</p>';
     return;
   }
-  const wrap = document.createElement("div");
-  wrap.className = "runs-table-wrap";
-  const table = document.createElement("table");
-  table.className = "runs-table";
-
-  const thead = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  for (const col of RUN_COLUMNS) {
-    const th = document.createElement("th");
-    th.title = col.title;
-    if (col.numeric) th.className = "num";
-    const active = state.runSort.key === col.key;
-    const ind = active ? (state.runSort.dir === "asc" ? "▲" : "▼") : "";
-    th.innerHTML = `${esc(col.label)}${ind ? `<span class="sort-ind">${ind}</span>` : ""}`;
-    th.addEventListener("click", () => setRunSort(col.key));
-    headRow.appendChild(th);
-  }
-  thead.appendChild(headRow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
-  for (const run of sortRuns(state.runsList)) {
-    tbody.appendChild(buildRunRow(run));
-  }
-  table.appendChild(tbody);
-  wrap.appendChild(table);
   els.runsList.innerHTML = "";
-  els.runsList.appendChild(wrap);
+  for (const run of sortRuns(state.runsList)) {
+    els.runsList.appendChild(buildRunRow(run));
+  }
   highlightActiveRun();
 }
 
@@ -980,15 +1049,15 @@ async function loadRuns() {
 
 /** Swap the label into an inline input; Enter/blur saves, Escape cancels. */
 function startLabelEdit(run, tr) {
-  const top = tr.querySelector(".run-name-top");
-  if (!top || top.querySelector(".run-label-input")) return;
+  const host = tr.querySelector(".run-row-main") || tr.querySelector(".run-name-top");
+  if (!host || host.querySelector(".run-label-input")) return;
   const input = document.createElement("input");
   input.type = "text";
   input.className = "run-label-input";
   input.value = run.label || "";
   input.maxLength = 200;
   input.placeholder = run.engine;
-  top.replaceChildren(input);
+  host.replaceChildren(input);
   let done = false;
   const finish = (save) => {
     if (done) return;
@@ -1090,7 +1159,7 @@ function runKey(engine, hash) {
 function refreshCompareTags() {
   for (const row of els.runsList.querySelectorAll(".run-row")) {
     const key = runKey(row.dataset.engine, row.dataset.hash);
-    const pick = state.compareA === key ? "[A]" : state.compareB === key ? "[B]" : "";
+    const pick = state.compareA === key ? "A" : state.compareB === key ? "B" : "";
     const tag = row.querySelector(".run-pick");
     if (tag) tag.textContent = pick;
   }
@@ -1112,7 +1181,13 @@ function pickCompareRun(engine, hash) {
   }
   syncCompareSelects();
   refreshCompareTags();
-  setStatus(`Compare: A=${state.compareA || "—"} B=${state.compareB || "—"}`);
+  const compareTab = document.querySelector('.vp-mode[data-mode="compare"]');
+  if (compareTab) compareTab.classList.toggle("hidden", !(state.compareA && state.compareB));
+  if (state.compareA && state.compareB) {
+    setStatus("Shift+click two runs, then open Compare.");
+  } else {
+    setStatus(`Compare: A=${state.compareA || "—"} B=${state.compareB || "—"}`);
+  }
 }
 
 function syncCompareSelects() {
@@ -1165,8 +1240,11 @@ async function compareSelectedRuns() {
 }
 
 function renderCompareResults(data) {
-  if (!els.compareResults || !els.compareResultsBody) return;
-  els.compareResults.classList.remove("hidden");
+  if (!els.compareResultsBody) return;
+  if (els.compareResults) els.compareResults.classList.remove("hidden");
+  const compareTab = document.querySelector('.vp-mode[data-mode="compare"]');
+  if (compareTab) compareTab.classList.remove("hidden");
+  setViewportMode("compare");
   const warnHtml = [
     data.warnings_new?.length
       ? `<p class="compare-warn-new"><strong>New warnings:</strong> ${esc(data.warnings_new.join("; "))}</p>`
@@ -1286,6 +1364,7 @@ async function openRun(engine, configHash) {
         },
         { isRun: true }
       );
+      updateBreadcrumb(data.config_source || `${data.engine} / ${data.config_hash.slice(0, 8)}`);
       await validateEditorConfig(state.editor.getConfig(), { silent: true });
     }
     setStatus(`Opened ${data.engine}_${data.config_hash}`);
@@ -1480,6 +1559,7 @@ async function loadEditorConfig() {
     if (loadId !== state.loadSeq) return;
     state.activeConfig = path;
     if (els.activeConfigPath) els.activeConfigPath.textContent = path;
+    updateBreadcrumb(path);
     highlightConfigNav();
     applyEditorPayload(data);
     await validateEditorConfig(state.editor.getConfig(), { silent: true });
@@ -1588,6 +1668,7 @@ async function checkHealth() {
   const data = await api("/api/health");
   els.health.textContent = `API ${data.status} · v${data.version}`;
   els.health.classList.add("ok");
+  els.health.hidden = true;
 }
 
 async function validateConfig() {
@@ -1625,7 +1706,19 @@ async function run(mode, { quiet = false } = {}) {
 
 els.btnValidate.addEventListener("click", validateConfig);
 els.btnRunFast.addEventListener("click", () => run("fast"));
-els.btnRunFull.addEventListener("click", () => run("full"));
+els.btnRunFull.addEventListener("click", () => {
+  closePopovers();
+  run("full");
+});
+els.btnRunMenu?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = els.runMenu.classList.contains("hidden");
+  closePopovers(open ? els.runMenu : null);
+  if (open) {
+    els.runMenu.classList.remove("hidden");
+    els.btnRunMenu.setAttribute("aria-expanded", "true");
+  }
+});
 els.btnRefreshRuns.addEventListener("click", loadRuns);
 els.btnRefreshCampaigns?.addEventListener("click", loadCampaigns);
 els.btnNewProject?.addEventListener("click", openCreateProjectDialog);
@@ -1657,6 +1750,56 @@ els.btnSave?.addEventListener("click", saveEdit);
 els.btnCancel?.addEventListener("click", cancelEdit);
 els.btnTheme?.addEventListener("click", toggleTheme);
 
+els.btnToggleNav?.addEventListener("click", () => {
+  els.appShell?.classList.toggle("nav-collapsed");
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+});
+els.btnToggleInspector?.addEventListener("click", () => {
+  els.appShell?.classList.toggle("inspector-collapsed");
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+});
+els.crumbProject?.addEventListener("click", () => {
+  els.appShell?.classList.remove("nav-collapsed");
+});
+els.btnCampaigns?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  togglePopover(els.campaignsPopover, els.btnCampaigns);
+});
+els.btnArtifacts?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  togglePopover(els.artifactsPopover, els.btnArtifacts);
+});
+els.btnKpiMore?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  togglePopover(els.morePopover, els.btnKpiMore);
+});
+els.btnWarnings?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  togglePopover(els.warningsPopover, els.btnWarnings);
+});
+els.viewportModes?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".vp-mode");
+  if (!btn) return;
+  const mode = btn.dataset.mode;
+  if (mode === "compare") {
+    if (state.compareA && state.compareB) compareSelectedRuns();
+    else setViewportMode("compare");
+    return;
+  }
+  setViewportMode(mode);
+});
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".popover") || e.target.closest(".split-btn") || e.target.closest("#btn-campaigns")) return;
+  closePopovers();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closePopovers();
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    e.preventDefault();
+    run("fast");
+  }
+});
+
 (async function init() {
   try {
     applyTheme(getTheme());
@@ -1669,10 +1812,17 @@ els.btnTheme?.addEventListener("click", toggleTheme);
         }
       },
       onDirty: (dirty) => markDirty(dirty),
+      onTabChange: (tab) => syncViewportForTab(tab),
+    });
+    state.editor.workspace?.mountStage({
+      geometryEl: document.getElementById("vp-geometry"),
+      thermalEl: document.getElementById("vp-thermal"),
     });
     await state.editor.loadSchema();
     await Promise.all([loadConfigs(), loadRuns(), loadCampaigns()]);
   } catch (err) {
+    els.health.hidden = false;
+    els.health.classList.remove("hidden", "ok");
     els.health.textContent = "API offline";
     els.health.style.color = "var(--danger)";
     setStatus(String(err.message), true);

@@ -1,8 +1,9 @@
-# RESA Studio — UI redesign proposal
+# RESA Studio — UI redesign
 
-Proposal for a cleaner Studio: less chrome, one viewport for geometry and
-plots, config as an inspector. Stack stays the same unless a later rewrite is
-explicitly chosen.
+Implemented: inspector + viewport shell. Geometry and plots share the centre
+stage; config is a right inspector; the sidebar is projects and runs.
+
+The sections below are the original proposal (kept as rationale).
 
 Related: [STUDIO.md](STUDIO.md) (current behaviour), `frontend/public/`.
 
