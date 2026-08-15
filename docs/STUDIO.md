@@ -3,6 +3,9 @@
 Browser UI for editing engine YAML, live geometry previews, fast sizing runs,
 full reports, run comparison, and campaigns.
 
+**Layout redesign (proposal):** [STUDIO_UI.md](STUDIO_UI.md) — current stack,
+why the chrome feels crowded, and a cleaner inspector + viewport variant.
+
 ## Install and launch
 
 ```bash
