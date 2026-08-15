@@ -331,9 +331,13 @@ def test_run_meta_and_baseline_api(client):
     )
     assert r.status_code == 404
     r = client.post(
-        "/api/runs/baseline", json={"engine": "NOENGINE", "config_hash": "dead"}
+        "/api/runs/baseline", json={"engine": "NOENGINE", "config_hash": "deadbeefcafe"}
     )
     assert r.status_code == 404
+    r = client.post(
+        "/api/runs/baseline", json={"engine": "../etc", "config_hash": "deadbeefcafe"}
+    )
+    assert r.status_code == 400
 
 
 def test_preview_cache_slow_run_still_fresh(monkeypatch):

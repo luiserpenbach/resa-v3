@@ -16,9 +16,11 @@ def safe_run_dirname(engine: str, config_hash: str) -> str:
             f"engine name must be 1–64 letters, digits, '.', '_' or '-' "
             f"(got {engine!r})"
         )
-    if not CONFIG_HASH_RE.match(config_hash):
+    # Inline / unhashed configs use the schema default ""; keep a stable folder.
+    digest = config_hash or "0" * 12
+    if not CONFIG_HASH_RE.match(digest):
         raise ValueError(f"invalid config hash: {config_hash!r}")
-    return f"{engine}_{config_hash}"
+    return f"{engine}_{digest}"
 
 
 def safe_output_name(name: str, *, fallback: str = "output") -> str:

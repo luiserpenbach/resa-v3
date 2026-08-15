@@ -70,7 +70,7 @@ def _results_dict(res: EngineResult) -> dict:
     if res.offdesign is not None:
         d["offdesign"] = offdesign_to_dict(res.offdesign)
     if res.film is not None:
-        d["film"] = res.film.summary()
+        d["film"] = {k: _clean(v) for k, v in res.film.summary().items()}
     if res.regen is not None:
         d["regen"] = res.regen.summary()
     return d
