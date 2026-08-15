@@ -10,6 +10,7 @@ from plotly.subplots import make_subplots
 from .coolant import Coolant
 from .layout import ChannelLayout
 from .mesh import build_channel_mesh, channel_centerline, inner_wall_surface
+from resa.reporting.plotly_theme import apply_studio_theme
 
 MM = 1e3
 
@@ -62,13 +63,11 @@ def figure_3d(lay: ChannelLayout, results=None, color_by: str = "T_wall_hot",
         name=f"centerline ch {highlight}"))
 
     fig.update_layout(
-        title="Regen channel geometry"
-              + (f" — colored by {cbar_title}" if inten is not None else ""),
         scene=dict(aspectmode="data",
                    xaxis_title="x [mm]", yaxis_title="y [mm]",
                    zaxis_title="z [mm]"),
-        template="plotly_white", margin=dict(l=0, r=0, t=40, b=0))
-    return fig
+        margin=dict(l=0, r=0, t=24, b=0))
+    return apply_studio_theme(fig)
 
 
 def figure_geometry(lay: ChannelLayout) -> go.Figure:
@@ -100,9 +99,7 @@ def figure_geometry(lay: ChannelLayout) -> go.Figure:
     fig.add_trace(go.Scatter(x=x, y=lay.A * 1e6, name="A [mm2]"), 2, 2)
     fig.add_trace(go.Scatter(x=x, y=lay.Dh * MM, name="Dh [mm]"), 2, 2)
     fig.update_xaxes(title_text="x [mm]", row=2)
-    fig.update_layout(title="Channel geometry profiles",
-                      template="plotly_white", height=720)
-    return fig
+    return apply_studio_theme(fig)
 
 
 def figure_results(df, lay: ChannelLayout, max_wall_T: float) -> go.Figure:
@@ -134,15 +131,7 @@ def figure_results(df, lay: ChannelLayout, max_wall_T: float) -> go.Figure:
     fig.add_trace(go.Scatter(x=x, y=df.T_sat_K, name="T_sat(p)",
                              line=dict(color="#9333ea", dash="dash")), 3, 2)
     fig.update_xaxes(title_text="x [mm]", row=3)
-    a = df.attrs
-    fig.update_layout(
-        title=(f"Regen solve — Q_total {a.get('Q_total_kW', 0):.1f} kW, "
-               f"dp {df.dp_cell_bar.sum():.1f} bar, "
-               f"outlet {a.get('outlet_T_K', 0):.0f} K / "
-               f"{a.get('outlet_p_bar', 0):.1f} bar, "
-               f"mdot_cool {a.get('mdot_total', 0):.3f} kg/s"),
-        template="plotly_white", height=950)
-    return fig
+    return apply_studio_theme(fig)
 
 
 def _coolant_path_df(df, inlet_location: str):
@@ -193,7 +182,6 @@ def figure_coolant_path(
     cool = Coolant(coolant_name)
     loc = inlet_location or df.attrs.get("coolant_inlet_location", "nozzle_end")
     path = _coolant_path_df(df, loc)
-    a = df.attrs
 
     T = path.T_cool_out_K.to_numpy()
     rho = path.rho_out.to_numpy()
@@ -254,18 +242,14 @@ def figure_coolant_path(
         x=x_mm, y=p_bar, name="p [bar]",
         line=dict(color="#0d9488")), row=1, col=2, secondary_y=True)
 
-    dh = a.get("dh_kJ_kg", 0.0)
-    bal = a.get("energy_balance_kW", 0.0)
-    fig.update_xaxes(title_text="T [K]", row=1, col=1)
+    fig.update_xaxes(title_text="x [mm]", row=1, col=2)
+    fig.update_yaxes(title_text="T [K]", row=1, col=2, secondary_y=False)
+    fig.update_yaxes(title_text="p [bar]", row=1, col=2, secondary_y=True,
+                     showgrid=False)
+    return apply_studio_theme(fig)
     fig.update_yaxes(title_text="ρ [kg/m³]", row=1, col=1)
     fig.update_xaxes(title_text="x [mm]", row=1, col=2)
     fig.update_yaxes(title_text="T [K]", row=1, col=2, secondary_y=False)
     fig.update_yaxes(title_text="p [bar]", row=1, col=2, secondary_y=True,
                      showgrid=False)
-    fig.update_layout(
-        title=(f"Coolant circuit — Δh={dh:.0f} kJ/kg, "
-               f"Q={a.get('Q_total_kW', 0):.1f} kW, "
-               f"mdot={a.get('mdot_total', 0):.3f} kg/s, "
-               f"energy closure {bal:.2e} kW"),
-        template="plotly_white", height=520, margin=dict(t=60))
-    return fig
+    return apply_studio_theme(fig)

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RESA Studio</title>
+  <title>RESA</title>
   <script>
     (function () {
       var k = "resa-studio-theme";
@@ -16,173 +16,169 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="topbar-brand">
-      <h1>RESA Studio</h1>
-      <span class="topbar-tag">Sizing &amp; Analysis</span>
+    <button type="button" id="btn-toggle-nav" class="btn-icon btn-ghost" title="Toggle project list" aria-label="Toggle project list">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+    <div class="topbar-brand" title="Rocket Engine Sizing &amp; Analysis">RESA</div>
+    <nav class="breadcrumb" aria-label="Current config">
+      <button type="button" id="crumb-project" class="crumb" title="Show project">—</button>
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <span id="crumb-config" class="crumb crumb-static">—</span>
+    </nav>
+    <button type="button" id="editor-validation" class="valid-dot" title="—" aria-label="Validation status"></button>
+    <span id="edit-hint" class="edit-hint hidden"></span>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-edit">
+      <button id="btn-edit" type="button" disabled>Edit</button>
+      <button id="btn-save" type="button" class="btn-primary hidden" disabled>Save</button>
+      <button id="btn-cancel" type="button" class="hidden">Cancel</button>
     </div>
-    <div class="topbar-actions">
-      <label class="toggle-inline">
-        <input type="checkbox" id="auto-run" />
-        Auto-run
-      </label>
-      <button id="btn-validate" type="button">Validate</button>
-      <button id="btn-run-fast" type="button" class="btn-primary">Run fast</button>
-      <button id="btn-run-full" type="button">Full report</button>
+    <div class="split-btn">
+      <button id="btn-run-fast" type="button" class="btn-primary">Run</button>
+      <button id="btn-run-menu" type="button" class="btn-primary btn-split-caret" aria-label="More run options" aria-haspopup="true" aria-expanded="false">
+        <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true"><path d="M1 1l4 4 4-4"/></svg>
+      </button>
+      <div id="run-menu" class="popover hidden" role="menu">
+        <button id="btn-run-full" type="button" role="menuitem">Full report</button>
+        <label class="toggle-inline" role="menuitem">
+          <input type="checkbox" id="auto-run" />
+          Auto-run while editing
+        </label>
+      </div>
     </div>
-    <div class="topbar-end">
-      <button id="btn-theme" type="button" class="btn-theme" aria-label="Switch to light mode">Light</button>
-      <div id="health" class="health">Connecting…</div>
-    </div>
+    <button id="btn-theme" type="button" class="btn-icon btn-ghost" aria-label="Switch to light mode" title="Theme">
+      <svg class="icon-sun" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M3.2 12.8l1.3-1.3M11.5 4.5l1.3-1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <svg class="icon-moon hidden" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 9.2A5.2 5.2 0 1 1 6.8 3 4.2 4.2 0 0 0 13 9.2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+    </button>
+    <button type="button" id="btn-toggle-inspector" class="btn-icon btn-ghost" title="Toggle inspector" aria-label="Toggle inspector">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3l5 5-5 5M1 3h6v10H1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+    </button>
+    <div id="health" class="health hidden" hidden>Connecting…</div>
   </header>
 
   <div class="app-shell">
     <aside class="sidebar" aria-label="Project browser">
-      <div class="sidebar-block" id="pinned-block">
-        <div class="sidebar-heading"><span>Pinned</span></div>
-        <nav id="pinned-nav" class="nav-tree nav-tree-compact">
-          <p class="placeholder">Pin configs from the list below.</p>
-        </nav>
-      </div>
-      <div class="sidebar-block" id="recent-block">
-        <div class="sidebar-heading"><span>Recent</span></div>
-        <nav id="recent-nav" class="nav-tree nav-tree-compact">
-          <p class="placeholder">—</p>
-        </nav>
-      </div>
       <div class="sidebar-block">
         <div class="sidebar-heading">
           <span>Projects</span>
           <button id="btn-new-project" type="button" class="btn-icon" title="New project">+</button>
         </div>
+        <nav id="pinned-nav" class="nav-tree nav-tree-compact"></nav>
         <nav id="config-nav" class="nav-tree nav-projects">
           <p class="placeholder">Loading…</p>
         </nav>
       </div>
-      <div class="sidebar-block">
-        <div class="sidebar-heading">
-          <span>Campaigns</span>
-          <button id="btn-refresh-campaigns" type="button" class="btn-icon" title="Refresh">↻</button>
-        </div>
-        <div id="campaigns-list" class="nav-runs">
-          <p class="placeholder">Loading…</p>
-        </div>
-      </div>
-      <div class="sidebar-block">
-        <div class="sidebar-heading"><span>Compare runs</span></div>
-        <div class="compare-panel">
-          <label class="compare-field">Run A
-            <select id="compare-run-a"><option value="">—</option></select>
-          </label>
-          <label class="compare-field">Run B
-            <select id="compare-run-b"><option value="">—</option></select>
-          </label>
-          <button id="btn-compare-runs" type="button" class="btn-compare">Compare</button>
-          <p class="form-hint compare-hint">Shift+click saved runs to pick A / B.</p>
-        </div>
-      </div>
       <div class="sidebar-block sidebar-block-grow">
         <div class="sidebar-heading">
-          <span>Saved runs</span>
-          <button id="btn-refresh-runs" type="button" class="btn-icon" title="Refresh">↻</button>
+          <span>Runs</span>
+          <button id="btn-refresh-runs" type="button" class="btn-icon" title="Refresh runs">↻</button>
         </div>
         <div id="runs-list" class="nav-runs">
           <p class="placeholder">Loading…</p>
         </div>
       </div>
+      <div class="sidebar-footer">
+        <button id="btn-campaigns" type="button" class="btn-sidebar-link">Campaigns</button>
+        <div id="campaigns-popover" class="popover popover-up hidden" role="dialog" aria-label="Campaigns">
+          <div class="popover-head">
+            <span>Campaigns</span>
+            <button id="btn-refresh-campaigns" type="button" class="btn-icon" title="Refresh">↻</button>
+          </div>
+          <div id="campaigns-list" class="nav-runs">
+            <p class="placeholder">Loading…</p>
+          </div>
+        </div>
+      </div>
     </aside>
 
-    <main class="workspace">
-      <div class="workspace-toolbar">
-        <div class="workspace-path">
-          <span class="workspace-label">Config</span>
-          <code id="active-config-path">—</code>
+    <div class="stage">
+      <div class="viewport">
+        <div class="viewport-bar">
+          <div id="viewport-modes" class="mode-strip" role="tablist" aria-label="Viewport">
+            <button type="button" class="vp-mode active" data-mode="geometry">Geometry</button>
+            <button type="button" class="vp-mode" data-mode="thermal">Thermal</button>
+            <button type="button" class="vp-mode" data-mode="sweeps">Sweeps</button>
+            <button type="button" class="vp-mode" data-mode="report">Report</button>
+            <button type="button" class="vp-mode hidden" data-mode="compare">Compare</button>
+          </div>
+          <div id="viewport-tools" class="viewport-tools"></div>
+          <button type="button" id="btn-artifacts" class="btn-ghost btn-sm hidden">Files</button>
         </div>
-        <div id="editor-validation" class="validation-badge">—</div>
+        <div class="viewport-body">
+          <div id="vp-geometry" class="vp-pane" data-vp="geometry"></div>
+          <div id="vp-thermal" class="vp-pane hidden" data-vp="thermal"></div>
+          <div id="vp-sweeps" class="vp-pane hidden" data-vp="sweeps">
+            <div id="offdesign-sweeps" class="offdesign-sweeps"></div>
+          </div>
+          <div id="vp-report" class="vp-pane hidden" data-vp="report">
+            <div id="plot-tabs" class="plot-tabs hidden"></div>
+            <iframe id="plot-frame" title="Plot" class="plot-frame hidden"></iframe>
+            <p id="plot-placeholder" class="vp-empty">Run a full report to generate plots.</p>
+          </div>
+          <div id="vp-compare" class="vp-pane hidden" data-vp="compare">
+            <div id="compare-results-body" class="compare-body"></div>
+          </div>
+        </div>
       </div>
 
-      <section class="card results-card">
-        <div class="card-header card-header-actions">
-          <h2>Results</h2>
-          <div class="card-header-right">
-            <button id="btn-pin-baseline" type="button" class="btn-pin-baseline hidden" title="Pin this run as the comparison baseline">📌 pin</button>
-            <div id="results-source-badge" class="results-source-badge hidden"></div>
-          </div>
-        </div>
-        <div class="card-body">
-          <p id="results-empty" class="results-empty">Run fast or a full report to see results.</p>
-          <div id="warnings" class="warnings hidden"></div>
-          <div id="kpis" class="kpis"></div>
-          <div id="run-meta-editor" class="run-meta-editor hidden">
-            <label class="run-meta-label" for="run-note-input">Note</label>
-            <textarea id="run-note-input" rows="2" placeholder="Add a note for this run…"></textarea>
-            <button id="btn-save-note" type="button" class="btn-inline btn-save-note">Save note</button>
-          </div>
-          <div id="offdesign-sweeps" class="offdesign-sweeps hidden"></div>
-          <details id="compare-results" class="compare-results hidden">
-            <summary>Run comparison</summary>
-            <div id="compare-results-body"></div>
-          </details>
-          <details class="provenance-details">
-            <summary>Provenance</summary>
-            <table id="provenance-table">
-              <thead>
-                <tr><th>Quantity</th><th>Source</th></tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </details>
-        </div>
-      </section>
-
-      <section class="card editor-card" id="editor-card">
-        <div class="card-header card-header-actions">
-          <div class="card-header-left">
-            <h2>Configuration</h2>
-            <span id="edit-mode-badge" class="edit-mode-badge">Viewing</span>
-          </div>
-          <div class="editor-actions">
-            <button id="btn-edit" type="button" class="btn-primary" disabled>Edit</button>
-            <button id="btn-save" type="button" class="hidden" disabled>Save changes</button>
-            <button id="btn-cancel" type="button" class="hidden">Cancel</button>
-          </div>
-        </div>
-        <p id="edit-hint" class="edit-hint hidden"></p>
-        <div class="card-body card-body-flush">
-          <div id="config-editor" class="config-editor">
-            <p class="placeholder">Select a config from the sidebar…</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="card plots-card">
-        <div class="card-header card-header-actions">
-          <h2>Visualizations</h2>
-          <span id="plot-source-badge" class="plot-source-badge hidden"></span>
-        </div>
-        <div class="card-body">
-          <div id="plot-tabs" class="plot-tabs hidden"></div>
-          <iframe id="plot-frame" title="Plot" class="plot-frame hidden"></iframe>
-          <p id="plot-placeholder" class="placeholder">
-            Run a full report or open a saved run to view plots.
-          </p>
-        </div>
-      </section>
-
+      <div class="kpi-strip" id="kpi-strip">
+        <p id="results-empty" class="results-empty">Run to see results</p>
+        <div id="kpis" class="kpis"></div>
+        <button type="button" id="btn-warnings" class="warn-chip hidden">0</button>
+        <button type="button" id="btn-kpi-more" class="btn-icon btn-ghost hidden" title="Run details" aria-label="Run details">⋯</button>
+      </div>
       <pre id="status" class="status-bar hidden" aria-live="polite"></pre>
-    </main>
+    </div>
 
-    <aside class="artifacts-rail" aria-label="Artifacts">
-      <div class="rail-header">
-        <h2>Artifacts</h2>
-      </div>
-      <div id="artifacts-list" class="artifacts-list">
-        <p class="placeholder">No artifacts yet.</p>
+    <aside class="inspector" id="editor-card" aria-label="Configuration">
+      <div id="config-editor" class="config-editor">
+        <p class="placeholder">Select a config…</p>
       </div>
     </aside>
   </div>
 
+  <div id="artifacts-popover" class="popover hidden" role="dialog" aria-label="Artifacts">
+    <div class="popover-head"><span>Files</span></div>
+    <div id="artifacts-list" class="artifacts-list">
+      <p class="placeholder">No files yet.</p>
+    </div>
+  </div>
+
+  <div id="more-popover" class="popover hidden" role="dialog" aria-label="Run details">
+    <div class="popover-head"><span>Run</span></div>
+    <div id="results-source-badge" class="results-source-badge hidden"></div>
+    <button id="btn-pin-baseline" type="button" class="btn-pin-baseline hidden">Pin as baseline</button>
+    <div id="run-meta-editor" class="run-meta-editor hidden">
+      <label class="run-meta-label" for="run-note-input">Note</label>
+      <textarea id="run-note-input" rows="2" placeholder="Note for this run…"></textarea>
+      <button id="btn-save-note" type="button" class="btn-inline btn-save-note">Save note</button>
+    </div>
+    <details class="provenance-details">
+      <summary>Provenance</summary>
+      <table id="provenance-table">
+        <thead>
+          <tr><th>Quantity</th><th>Source</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </details>
+  </div>
+
+  <div id="warnings-popover" class="popover hidden" role="dialog" aria-label="Warnings">
+    <div id="warnings" class="warnings"></div>
+  </div>
+
   <!-- hidden: kept for JS compatibility -->
   <select id="config-path" class="hidden" aria-hidden="true"></select>
+  <span id="active-config-path" class="hidden" aria-hidden="true"></span>
+  <span id="plot-source-badge" class="hidden" aria-hidden="true"></span>
+  <span id="edit-mode-badge" class="hidden" aria-hidden="true"></span>
+  <nav id="recent-nav" class="hidden" aria-hidden="true"></nav>
+  <button id="btn-validate" type="button" class="hidden" aria-hidden="true">Validate</button>
+  <select id="compare-run-a" class="hidden" aria-hidden="true"><option value="">—</option></select>
+  <select id="compare-run-b" class="hidden" aria-hidden="true"><option value="">—</option></select>
+  <button id="btn-compare-runs" type="button" class="hidden" aria-hidden="true">Compare</button>
+  <details id="compare-results" class="hidden"><summary>Compare</summary></details>
 
   <dialog id="dialog-new-project" class="studio-dialog">
     <form id="form-new-project" class="dialog-form">

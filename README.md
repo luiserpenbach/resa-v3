@@ -5,7 +5,7 @@ self-contained report folders. Optional **RESA Studio** web UI for interactive
 editing and previews.
 
 **Config reference:** [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
-**Studio UI:** [docs/STUDIO.md](docs/STUDIO.md)
+**Studio UI:** [docs/STUDIO.md](docs/STUDIO.md) · [redesign proposal](docs/STUDIO_UI.md)
 
 ## Quick start
 

@@ -56,7 +56,7 @@
     { id: "propellants", title: "Propellants", keys: ["propellants"] },
     { id: "combustion", title: "Combustion", keys: ["combustion"] },
     { id: "chamber", title: "Chamber", keys: ["chamber"] },
-    { id: "cooling", title: "Regen cooling", keys: ["cooling", "regen"] },
+    { id: "cooling", title: "Regen", keys: ["cooling", "regen"] },
     { id: "offdesign", title: "Off-design", keys: ["offdesign"] },
   ];
 
@@ -217,6 +217,7 @@
       this.container = container;
       this.onChange = callbacks.onChange || (() => {});
       this.onDirty = callbacks.onDirty || (() => {});
+      this.onTabChange = callbacks.onTabChange || (() => {});
       this.config = null;
       this.mode = "design";
       this.activeTab = "design";
@@ -342,13 +343,12 @@
       const badge = document.getElementById("editor-validation");
       if (!badge) return;
       const errCount = this.validationErrors.length;
-      badge.textContent = ok === false && errCount
-        ? `${errCount} validation error${errCount > 1 ? "s" : ""}`
-        : message;
-      badge.className = "validation-badge " + (ok ? "ok" : ok === false ? "error" : "");
+      badge.textContent = "";
+      badge.className = "valid-dot " + (ok ? "ok" : ok === false ? "error" : "");
       badge.title = ok === false && errCount
         ? this.validationErrors.map((e) => `${(e.loc || []).join(".")}: ${e.msg}`).join("\n")
-        : message;
+        : (message || "—");
+      badge.setAttribute("aria-label", ok ? "Config valid" : ok === false ? "Config invalid" : "Validation unknown");
       this._applyFieldErrors();
       this._renderConstraintsPanel();
     }
@@ -665,10 +665,8 @@
     }
 
     _render() {
-      // Destroy viewers mounted by the previous render before replacing the
-      // DOM, so their window listeners / ResizeObservers / GL buffers are
-      // released instead of leaking on every re-render.
-      this.workspace?.destroyMounted?.();
+      // Live canvases live in the centre viewport and must survive form
+      // re-renders. Only destroy axial-profile editors owned by this form.
       if (this._regenProfileContainer?.instances) {
         for (const inst of Object.values(this._regenProfileContainer.instances)) {
           inst.destroy?.();
@@ -717,6 +715,7 @@
         tab.addEventListener("click", () => {
           this.activeTab = sec.id;
           this._render();
+          this.onTabChange(sec.id);
           if (sec.id === "cooling" && this.workspace) {
             this.workspace.prefetchCooling();
             this.workspace._debouncedThermal();
@@ -736,9 +735,7 @@
       this._renderConstraintsPanel();
       this.container.classList.toggle("is-editing", this.editable);
       this._applyEditableState();
-      if (this.workspace && (this.activeTab === "chamber" || this.activeTab === "cooling" || this.activeTab === "analyze")) {
-        this.workspace.refresh();
-      }
+      this.onTabChange(this.activeTab);
     }
 
     _switchMode(mode) {
@@ -995,13 +992,9 @@
       const note = document.createElement("p");
       note.className = "config-tab-footnote analyze-note";
       note.textContent =
-        "Chamber contour, cooling, and off-design sweeps still use the shared blocks in other tabs. " +
-        "Run fast to refresh KPIs and off-design mini charts in Results.";
+        "Chamber, regen, and off-design still use the other inspector tabs.";
       form.appendChild(note);
-
-      return this._workspaceSplit(form, (col) => {
-        if (this.workspace) this.workspace.mountChamberPanel(col);
-      });
+      return form;
     }
 
     _renderOffdesignTab() {
@@ -1009,8 +1002,7 @@
       wrap.className = "config-tab offdesign-form";
 
       wrap.appendChild(this._configTabIntro(
-        "Off-design sweeps vary throttle and mixture ratio around the nominal design point with fixed geometry. " +
-        "Enable sweeps below, then run fast — mini charts appear in the Results panel."
+        "Sweeps vary throttle and mixture around the nominal point with fixed geometry."
       ));
 
       const enabled = this.config.offdesign != null;
@@ -1154,20 +1146,18 @@
       const otherRows = allRows.filter((r) => !r.key || !CHAMBER_CONTOUR_KEYS.includes(r.key));
 
       form.appendChild(this._buildCoolingSection(
-        "Contour & sizing",
-        "Primary inputs for the chamber meridional contour (L*, contraction, bell). Preview updates live.",
+        "Contour",
+        "L*, contraction, and bell. Geometry updates in the viewport.",
         contourRows
       ));
       if (otherRows.length) {
         form.appendChild(this._buildCoolingSection(
-          "Advanced chamber",
-          "Additional contour and discretization parameters.",
+          "Advanced",
+          "",
           otherRows
         ));
       }
-      return this._workspaceSplit(form, (col) => {
-        if (this.workspace) this.workspace.mountChamberPanel(col);
-      });
+      return form;
     }
 
     _renderCoolingTab() {
@@ -1179,14 +1169,6 @@
         page.appendChild(RD.buildForm(this, this.workspace));
       } else {
         page.innerHTML = '<p class="optional-empty">Regen design module failed to load.</p>';
-      }
-
-      const previewMount = document.createElement("div");
-      previewMount.className = "regen-design-previews";
-      page.appendChild(previewMount);
-
-      if (this.workspace) {
-        this.workspace.mountRegenDesignPanel(previewMount, this);
       }
 
       return page;

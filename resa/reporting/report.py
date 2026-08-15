@@ -246,11 +246,12 @@ def write_report(
     if res.contour is not None:
         np.savetxt(outdir / "contour.csv", res.contour.station_table(),
                    delimiter=",", header="x_m,r_m,area_m2,mach", comments="")
-        plots.contour_figure(res.contour, title=f"{res.engine} contour"
-                             ).write_html(outdir / "contour.html",
-                                          include_plotlyjs="cdn")
-        plots.mach_figure(res.contour).write_html(outdir / "mach.html",
-                                                  include_plotlyjs="cdn")
+        plots.contour_figure(res.contour).write_html(
+            outdir / "contour.html", include_plotlyjs="cdn",
+            config={"displaylogo": False, "responsive": True})
+        plots.mach_figure(res.contour).write_html(
+            outdir / "mach.html", include_plotlyjs="cdn",
+            config={"displaylogo": False, "responsive": True})
 
     od = res.offdesign
     u = res.uncertainty
@@ -269,10 +270,12 @@ def write_report(
                 if band[0] is None:
                     band = None
             figfn(sweep, nominal=tc, band=band).write_html(
-                outdir / f"offdesign_{name}.html", include_plotlyjs="cdn")
+                outdir / f"offdesign_{name}.html", include_plotlyjs="cdn",
+                config={"displaylogo": False, "responsive": True})
         if od.envelope is not None:
             plots.envelope_figure(od.envelope, nominal=tc).write_html(
-                outdir / "offdesign_envelope.html", include_plotlyjs="cdn")
+                outdir / "offdesign_envelope.html", include_plotlyjs="cdn",
+                config={"displaylogo": False, "responsive": True})
 
     cfg_yaml = yaml.safe_dump(cfg.model_dump(), sort_keys=False)
     (outdir / "config_resolved.yaml").write_text(cfg_yaml, encoding="utf-8")

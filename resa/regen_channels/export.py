@@ -17,8 +17,6 @@ from .mesh import (
     write_step,
 )
 
-_PLOTLY_JS = "cdn"
-
 
 def export_artifacts(
     lay: ChannelLayout,
@@ -77,27 +75,29 @@ def export_artifacts(
             warnings.append(f"regen: STEP export skipped — {exc}")
     if e.html_3d:
         from .viz import figure_3d
+        from resa.reporting.plotly_theme import write_studio_html
         ids = e.channel_ids(lay, "html_3d_channels")
         f = out_dir / html_3d_export_basename(tag, ids)
-        figure_3d(
+        write_studio_html(figure_3d(
             lay, results, color_by=e.color_3d_by, channel_ids=ids,
-        ).write_html(str(f), include_plotlyjs=_PLOTLY_JS)
+        ), f)
         files.append(str(f))
     if e.html_plots:
         from .viz import figure_coolant_path, figure_geometry, figure_results
+        from resa.reporting.plotly_theme import write_studio_html
         f = out_dir / f"{tag}_geometry_plots.html"
-        figure_geometry(lay).write_html(str(f), include_plotlyjs=_PLOTLY_JS)
+        write_studio_html(figure_geometry(lay), f)
         files.append(str(f))
         if results is not None:
             f = out_dir / f"{tag}_results_plots.html"
-            figure_results(
+            write_studio_html(figure_results(
                 results, lay, cfg.solver.wall.max_wall_temp_K,
-            ).write_html(str(f), include_plotlyjs=_PLOTLY_JS)
+            ), f)
             files.append(str(f))
             f = out_dir / f"{tag}_coolant_path.html"
-            figure_coolant_path(
+            write_studio_html(figure_coolant_path(
                 results, cfg.solver.coolant,
-            ).write_html(str(f), include_plotlyjs=_PLOTLY_JS)
+            ), f)
             files.append(str(f))
 
     return tuple(files), tuple(warnings)

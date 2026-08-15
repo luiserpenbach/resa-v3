@@ -200,6 +200,7 @@ def _write_sweep_plots(spec: CampaignSpec, rows: list[dict], out_root: Path) -> 
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
+        from .reporting.plotly_theme import apply_studio_theme
     except ImportError:
         return None
     axes = [name for name, _ in spec.sweep]
@@ -224,8 +225,8 @@ def _write_sweep_plots(spec: CampaignSpec, rows: list[dict], out_root: Path) -> 
                            mode="lines+markers", name=m),
                 row=i, col=1)
         fig.update_xaxes(title_text=ax, row=len(metrics))
-        fig.update_layout(title=f"Sweep: {spec.name}", template="plotly_white",
-                          height=240 * len(metrics), showlegend=False)
+        fig.update_layout(showlegend=False)
+        apply_studio_theme(fig)
     else:
         ax_x, ax_y = axes[1], axes[0]   # first axis varies slowest → rows
         xs = sorted({r[ax_x] for r in ok_rows})
@@ -243,10 +244,10 @@ def _write_sweep_plots(spec: CampaignSpec, rows: list[dict], out_root: Path) -> 
                 row=1, col=i)
             fig.update_xaxes(title_text=ax_x, row=1, col=i)
         fig.update_yaxes(title_text=ax_y, row=1, col=1)
-        fig.update_layout(title=f"Sweep: {spec.name}", template="plotly_white",
-                          height=460)
+        apply_studio_theme(fig)
 
-    fig.write_html(str(path), include_plotlyjs="cdn")
+    fig.write_html(str(path), include_plotlyjs="cdn",
+                   config={"displaylogo": False, "responsive": True})
     return path
 
 

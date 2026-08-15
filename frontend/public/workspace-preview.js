@@ -266,13 +266,16 @@
       const colors = canvasColors();
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.parentElement.getBoundingClientRect();
-      const size = Math.min(rect.width - 8, 420);
-      canvas.width = size * dpr;
-      canvas.height = size * dpr;
-      canvas.style.width = `${size}px`;
-      canvas.style.height = `${size}px`;
+      const w = Math.max(rect.width, 48);
+      const h = Math.max(rect.height, 48);
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, size, size);
+      ctx.clearRect(0, 0, w, h);
+      const size = Math.min(w, h);
+      ctx.translate((w - size) / 2, (h - size) / 2);
 
       if (!this.data?.contour) {
         ctx.fillStyle = colors.textMuted;
@@ -517,10 +520,12 @@
       const gl = this.gl;
       if (!gl) return;
       const rect = this.canvas.parentElement.getBoundingClientRect();
-      const w = Math.min(rect.width - 8, 420);
-      const h = w;
+      const w = Math.max(rect.width, 48);
+      const h = Math.max(rect.height, 48);
       this.canvas.width = w;
       this.canvas.height = h;
+      this.canvas.style.width = `${w}px`;
+      this.canvas.style.height = `${h}px`;
       gl.viewport(0, 0, w, h);
       gl.clearColor(0.08, 0.09, 0.11, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -772,8 +777,15 @@
       this.canvas = canvas;
       this.ctx = canvas.getContext("2d");
       this.data = null;
+      this.cursorX = null;
+      this.showVelocity = false;
+      this.onCursor = null;
+      this._toX = null;
+      this._fromX = null;
       this._resizeObs = new ResizeObserver(() => this.draw());
       this._resizeObs.observe(canvas.parentElement || canvas);
+      canvas.addEventListener("mousemove", (e) => this._onMove(e));
+      canvas.addEventListener("click", (e) => this._onMove(e, true));
     }
 
     destroy() {
@@ -785,14 +797,30 @@
       this.draw();
     }
 
+    setCursorX(x_m) {
+      this.cursorX = x_m;
+      this.draw();
+    }
+
+    _onMove(e, commit = false) {
+      if (!this._fromX) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const xMm = this._fromX(e.clientX - rect.left);
+      const x_m = xMm / 1000;
+      this.cursorX = x_m;
+      this.draw();
+      if (commit || e.type === "mousemove") this.onCursor?.(x_m, commit);
+    }
+
     draw() {
       const ctx = this.ctx;
       if (!ctx) return;
       const canvas = this.canvas;
       const colors = canvasColors();
       const dpr = window.devicePixelRatio || 1;
-      const w = canvas.parentElement?.clientWidth || 320;
-      const h = 210;
+      const parent = canvas.parentElement;
+      const w = parent?.clientWidth || 320;
+      const h = Math.max(parent?.clientHeight || 210, 160);
       if (w < 40) return;
       canvas.width = w * dpr;
       canvas.height = h * dpr;
@@ -832,6 +860,8 @@
       yMax += yPad;
       const toX = (xm) => padL + ((xm - xMin) / (xMax - xMin || 1)) * pw;
       const toY = (t) => padT + ph * (1 - (t - yMin) / (yMax - yMin || 1));
+      this._toX = toX;
+      this._fromX = (px) => xMin + ((px - padL) / (pw || 1)) * (xMax - xMin);
 
       // Grid + tick labels
       ctx.font = "9px system-ui,sans-serif";
@@ -985,6 +1015,41 @@
       ctx.rotate(-Math.PI / 2);
       ctx.fillText("T_wall,hot (K)", 0, 0);
       ctx.restore();
+
+      const vel = this.showVelocity ? prof.v_m_s : null;
+      if (vel?.length === xs.length) {
+        const vMin = Math.min(...vel);
+        const vMax = Math.max(...vel);
+        const toYv = (v) => padT + ph * (1 - (v - vMin) / (vMax - vMin || 1));
+        ctx.strokeStyle = colors.accent;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        for (let i = 0; i < xsMm.length; i++) {
+          const px = toX(xsMm[i]);
+          const py = toYv(vel[i]);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = colors.accent;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        ctx.fillText("v", padL + pw - 4, padT + 2);
+      }
+
+      if (this.cursorX != null) {
+        const cx = toX(this.cursorX * 1000);
+        ctx.strokeStyle = colors.accent;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(cx, padT);
+        ctx.lineTo(cx, padT + ph);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.textAlign = "left";
     }
   }
@@ -1529,6 +1594,51 @@
       // Session-scoped: lives on the workspace state object, no localStorage.
       this.thermalFidelity = "preview";
       this._exportChannelId = 0;
+      this.geometryKind = "chamber";
+      this._chamberWrap = null;
+      this._coolingWrap = null;
+      this._thermalWrap = null;
+    }
+
+    mountStage({ geometryEl, thermalEl }) {
+      this.geometryEl = geometryEl;
+      this.thermalEl = thermalEl;
+      if (geometryEl && !this._chamberWrap) this.mountChamberPanel(geometryEl);
+      if (geometryEl && !this._coolingWrap) this.mountCoolingGeometry(geometryEl);
+      if (thermalEl && !this._thermalWrap) this.mountThermalPanel(thermalEl);
+      this.setGeometryKind(this.geometryKind || "chamber");
+    }
+
+    setGeometryKind(kind) {
+      this.geometryKind = kind === "cooling" ? "cooling" : "chamber";
+      if (this._chamberWrap) this._chamberWrap.classList.toggle("hidden", this.geometryKind !== "chamber");
+      if (this._coolingWrap) this._coolingWrap.classList.toggle("hidden", this.geometryKind !== "cooling");
+      if (this.geometryKind === "cooling") {
+        this.cooling3dVisible = true;
+        this.prefetchCooling();
+      }
+      requestAnimationFrame(() => {
+        this._refreshChamberCanvases();
+        this._refreshCoolingCanvases();
+        if (this._assembly3dCache) {
+          const inst = this._coolingWrap && this._instances.get(this._coolingWrap);
+          inst?.assembly3d?.draw?.();
+        }
+      });
+    }
+
+    setAxialX(x_m, { fetch = true } = {}) {
+      if (!Number.isFinite(x_m)) return;
+      this.axialX = x_m;
+      const inst = this._thermalWrap && this._instances.get(this._thermalWrap);
+      inst?.marginPlot?.setCursorX(x_m);
+      for (const wrap of this._coolingWraps()) {
+        const slider = wrap.querySelector(".ws-axial-slider");
+        const valEl = wrap.querySelector(".ws-axial-value");
+        if (slider) slider.value = x_m;
+        if (valEl) valEl.textContent = x_m.toFixed(4);
+      }
+      if (fetch) this._fetchCooling(x_m);
     }
 
     /**
@@ -1557,12 +1667,7 @@
 
     prefetchCooling() {
       this._fetchCooling();
-      if (!this.cooling3dVisible && !this._mesh3dCache) {
-        this._fetchCooling3d(null, { quiet: true });
-      }
-      if (!this.cooling3dVisible && !this._assembly3dCache) {
-        this._fetchAssembly3d(null, { quiet: true });
-      }
+      if (!this._assembly3dCache) this._fetchAssembly3d(null, { quiet: true });
       if (this.editor?.config?.regen?.solver?.enabled !== false) {
         this._debouncedThermal();
       }
@@ -1598,10 +1703,7 @@
       this._assembly3dCache = null;
       this._debouncedContour();
       this._debouncedCooling();
-      if (this.cooling3dVisible) {
-        this._debounced3d();
-        this._debouncedAssembly3d();
-      }
+      if (this.cooling3dVisible) this._debouncedAssembly3d();
       if (this.editor?.config?.regen?.solver?.enabled !== false) {
         this._debouncedThermal();
       }
@@ -1688,7 +1790,10 @@
               : `${data.preview_stations} of ${data.full_stations} stations`)
             : "";
         }
-        if (inst?.marginPlot) inst.marginPlot.setData(data);
+        if (inst?.marginPlot) {
+          inst.marginPlot.setData(this.thermalData);
+          if (this.axialX != null) inst.marginPlot.setCursorX(this.axialX);
+        }
         const kpis = panel.querySelector(".thermal-kpis");
         const spark = panel.querySelector(".ws-thermal-spark");
         const velSpark = panel.querySelector(".ws-velocity-spark");
@@ -1923,6 +2028,7 @@
     }
 
     mountChamberPanel(container) {
+      if (this._chamberWrap) return this._chamberWrap;
       const wrap = document.createElement("div");
       wrap.className = "workspace-preview";
       wrap.innerHTML = `
@@ -1931,12 +2037,11 @@
           <span class="ws-loading-msg">Updating contour…</span>
         </div>
         <div class="workspace-preview-toolbar">
-          <button type="button" class="btn-inline ws-view-2d active">2D contour</button>
-          <button type="button" class="btn-inline ws-view-3d">3D chamber</button>
+          <button type="button" class="btn-inline ws-view-2d active">2D</button>
+          <button type="button" class="btn-inline ws-view-3d">3D</button>
           <label class="toggle-inline ws-dims"><input type="checkbox" checked> Dimensions</label>
           <label class="toggle-inline ws-grid"><input type="checkbox" checked> Grid</label>
         </div>
-        <p class="viewport-hint">Shift+drag or middle-click to pan · +/- to zoom · focus viewport for keys</p>
         <div class="workspace-canvas-wrap has-viewport-zoom">
           <canvas class="ws-chamber-2d"></canvas>
           <canvas class="ws-chamber-3d hidden"></canvas>
@@ -1944,6 +2049,7 @@
         <p class="workspace-preview-hint ws-chamber-status"></p>
       `;
       container.appendChild(wrap);
+      this._chamberWrap = wrap;
 
       const c2d = wrap.querySelector(".ws-chamber-2d");
       const c3d = wrap.querySelector(".ws-chamber-3d");
@@ -1985,143 +2091,19 @@
     }
 
     mountRegenDesignPanel(container, editor) {
-      const wrap = document.createElement("div");
-      wrap.className = "workspace-preview workspace-cooling regen-design-workspace";
-      wrap.innerHTML = `
-        <div class="workspace-loading hidden" aria-live="polite">
-          <div class="workspace-spinner"></div>
-          <span class="ws-loading-msg">Updating preview…</span>
-        </div>
+      return this.mountCoolingGeometry(container, editor);
+    }
 
-        <section class="regen-design-section regen-live-section">
-          <h3 class="form-section-title">5 · Live analysis</h3>
-          <p class="form-section-hint">Cross-section at an axial station, plus fast thermal solve along the full circuit.</p>
-          <label class="workspace-slider-label">Axial position x (m)
-            <input type="range" class="ws-axial-slider" step="any" />
-            <span class="ws-axial-value">—</span>
-          </label>
-          <div class="workspace-canvas-wrap ws-cool-section-view has-viewport-zoom">
-            <canvas class="ws-throat-section"></canvas>
-          </div>
-          <p class="workspace-preview-hint ws-cooling-status"></p>
-          <div class="thermal-preview-panel hidden">
-            <div class="thermal-kpis"></div>
-            <div class="regen-margin-plot">
-              <div class="regen-margin-head">
-                <span class="regen-plot-label">Thermal margin — hot wall vs limit</span>
-                <span class="thermal-fidelity">
-                  <button type="button" class="btn-inline ws-fid-preview active">Fast preview</button>
-                  <button type="button" class="btn-inline ws-fid-full">Full stations</button>
-                  <span class="ws-station-count"></span>
-                </span>
-              </div>
-              <canvas class="ws-margin-plot"></canvas>
-            </div>
-            <div class="regen-thermal-plots">
-              <div class="regen-plot-cell">
-                <span class="regen-plot-label">Hot wall temperature</span>
-                <canvas class="ws-thermal-spark"></canvas>
-              </div>
-              <div class="regen-plot-cell">
-                <span class="regen-plot-label">Coolant velocity</span>
-                <canvas class="ws-velocity-spark"></canvas>
-              </div>
-            </div>
-            <div class="thermal-preview-actions">
-              <button type="button" class="btn-inline ws-thermal-run">Run thermal preview</button>
-              <span class="thermal-note form-hint"></span>
-            </div>
-          </div>
-        </section>
-
-        <section class="regen-design-section regen-3d-section">
-          <h3 class="form-section-title">6 · 3D channel geometry &amp; export</h3>
-          <p class="form-section-hint">Rotate the channel mesh. Export individual channels as STL or STEP for CAD.</p>
-          <div class="workspace-preview-toolbar regen-export-toolbar">
-            <label class="ws-export-channel-label">Channel
-              <select class="ws-export-channel"></select>
-            </label>
-            <button type="button" class="btn-inline ws-cool-export-stl">Export STL</button>
-            <button type="button" class="btn-inline ws-cool-export-step">Export STEP</button>
-          </div>
-          <div class="workspace-canvas-wrap ws-cool-3d-view has-viewport-zoom">
-            <canvas class="ws-channel-3d"></canvas>
-          </div>
-        </section>
-
-        <section class="regen-design-section regen-assembly-section">
-          <h3 class="form-section-title">7 · Wall assembly</h3>
-          <p class="form-section-hint">Inner wall, milled channel grooves and closeout as built. The cutaway removes a sector of the closeout to expose the channels.</p>
-          <div class="workspace-preview-toolbar assembly-controls">
-            <label class="toggle-inline ws-asm-inner"><input type="checkbox" checked> Inner wall</label>
-            <label class="toggle-inline ws-asm-channels"><input type="checkbox" checked> Channels</label>
-            <label class="toggle-inline ws-asm-closeout"><input type="checkbox" checked> Closeout</label>
-            <label class="workspace-slider-label ws-asm-cutaway-label">Cutaway
-              <input type="range" class="ws-asm-cutaway" min="0" max="180" step="1" value="90" />
-              <span class="ws-asm-cutaway-value">90°</span>
-            </label>
-          </div>
-          <div class="workspace-canvas-wrap ws-assembly-view has-viewport-zoom">
-            <canvas class="ws-assembly-3d"></canvas>
-          </div>
-          <p class="workspace-preview-hint ws-assembly-caption"></p>
-        </section>
-      `;
-      container.appendChild(wrap);
-
-      const section = new ThroatSectionCanvas(wrap.querySelector(".ws-throat-section"));
-      const mesh3d = new ChannelMesh3D(wrap.querySelector(".ws-channel-3d"));
-      const marginPlot = new MarginPlotCanvas(wrap.querySelector(".ws-margin-plot"));
-      const assembly3d = new WallAssembly3D(wrap.querySelector(".ws-assembly-3d"));
-      mountViewportZoom(wrap.querySelector(".ws-cool-section-view"), () => section);
-      mountViewportZoom(wrap.querySelector(".ws-cool-3d-view"), () => mesh3d);
-      mountViewportZoom(wrap.querySelector(".ws-assembly-view"), () => assembly3d);
-      this._instances.set(wrap, { section, mesh3d, marginPlot, assembly3d, wrap, editor });
-      this._mounted.push(section, mesh3d, marginPlot, assembly3d);
-
-      // Assembly controls only rebuild/redraw locally — no refetch.
-      for (const [cls, part] of [
-        ["ws-asm-inner", "inner"],
-        ["ws-asm-channels", "channels"],
-        ["ws-asm-closeout", "closeout"],
-      ]) {
-        wrap.querySelector(`.${cls} input`).addEventListener("change", (e) => {
-          assembly3d.setShow(part, e.target.checked);
-        });
-      }
-      const cutSlider = wrap.querySelector(".ws-asm-cutaway");
-      cutSlider.addEventListener("input", () => {
-        const deg = parseFloat(cutSlider.value) || 0;
-        wrap.querySelector(".ws-asm-cutaway-value").textContent = `${Math.round(deg)}°`;
-        assembly3d.setCutaway(deg);
-      });
-
-      const setFidelity = (fidelity) => {
-        if (this.thermalFidelity === fidelity) return;
-        this.thermalFidelity = fidelity;
-        this._updateThermalPanels();
-        this._fetchThermal();
-      };
-      wrap.querySelector(".ws-fid-preview").addEventListener("click", () => setFidelity("preview"));
-      wrap.querySelector(".ws-fid-full").addEventListener("click", () => setFidelity("full"));
-
-      const slider = wrap.querySelector(".ws-axial-slider");
-      slider.addEventListener("input", () => {
-        const x = parseFloat(slider.value);
-        this.axialX = x;
-        wrap.querySelector(".ws-axial-value").textContent = x.toFixed(4);
-        this._fetchCooling(x);
-      });
-
-      const exportFmt = async (fmt) => {
-        const cfg = editor.getConfig();
-        const chSel = wrap.querySelector(".ws-export-channel");
-        const channelId = chSel ? parseInt(chSel.value, 10) : 0;
-        const res = await fetch("/api/preview/cooling/export-channel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ config: cfg, channel_id: channelId, format: fmt }),
-        });
+    _exportChannel(fmt, wrap) {
+      const editor = this.editor;
+      const chSel = wrap.querySelector(".ws-export-channel")
+        || this._coolingWrap?.querySelector(".ws-export-channel");
+      const channelId = chSel ? parseInt(chSel.value, 10) : 0;
+      return fetch("/api/preview/cooling/export-channel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: editor.getConfig(), channel_id: channelId, format: fmt }),
+      }).then(async (res) => {
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           const detail = err.detail;
@@ -2140,27 +2122,160 @@
         a.download = `channel_${String(channelId).padStart(2, "0")}.${fmt}`;
         a.click();
         URL.revokeObjectURL(a.href);
-      };
+      });
+    }
+
+    mountCoolingGeometry(container, editor) {
+      if (this._coolingWrap) return this._coolingWrap;
+      const ed = editor || this.editor;
+      const wrap = document.createElement("div");
+      wrap.className = "workspace-preview workspace-cooling regen-design-workspace";
+      wrap.innerHTML = `
+        <div class="workspace-loading hidden" aria-live="polite">
+          <div class="workspace-spinner"></div>
+          <span class="ws-loading-msg">Updating assembly…</span>
+        </div>
+        <div class="workspace-preview-toolbar assembly-controls">
+          <label class="toggle-inline ws-asm-inner"><input type="checkbox" checked> Wall</label>
+          <label class="toggle-inline ws-asm-channels"><input type="checkbox" checked> Channels</label>
+          <label class="toggle-inline ws-asm-closeout"><input type="checkbox" checked> Closeout</label>
+          <label class="workspace-slider-label ws-asm-cutaway-label">Cutaway
+            <input type="range" class="ws-asm-cutaway" min="0" max="180" step="1" value="90" />
+            <span class="ws-asm-cutaway-value">90°</span>
+          </label>
+          <label class="ws-export-channel-label">Ch
+            <select class="ws-export-channel"></select>
+          </label>
+          <button type="button" class="btn-inline ws-cool-export-stl">STL</button>
+          <button type="button" class="btn-inline ws-cool-export-step">STEP</button>
+        </div>
+        <div class="workspace-canvas-wrap ws-assembly-view has-viewport-zoom">
+          <canvas class="ws-assembly-3d"></canvas>
+        </div>
+        <p class="workspace-preview-hint ws-assembly-caption"></p>
+      `;
+      container.appendChild(wrap);
+      this._coolingWrap = wrap;
+
+      const assembly3d = new WallAssembly3D(wrap.querySelector(".ws-assembly-3d"));
+      mountViewportZoom(wrap.querySelector(".ws-assembly-view"), () => assembly3d);
+      this._instances.set(wrap, { assembly3d, wrap, editor: ed });
+      this._mounted.push(assembly3d);
+
+      for (const [cls, part] of [
+        ["ws-asm-inner", "inner"],
+        ["ws-asm-channels", "channels"],
+        ["ws-asm-closeout", "closeout"],
+      ]) {
+        wrap.querySelector(`.${cls} input`).addEventListener("change", (e) => {
+          assembly3d.setShow(part, e.target.checked);
+        });
+      }
+      const cutSlider = wrap.querySelector(".ws-asm-cutaway");
+      cutSlider.addEventListener("input", () => {
+        const deg = parseFloat(cutSlider.value) || 0;
+        wrap.querySelector(".ws-asm-cutaway-value").textContent = `${Math.round(deg)}°`;
+        assembly3d.setCutaway(deg);
+      });
       wrap.querySelector(".ws-cool-export-stl").addEventListener("click", () =>
-        exportFmt("stl").catch((e) => { wrap.querySelector(".ws-cooling-status").textContent = e.message; })
+        this._exportChannel("stl", wrap).catch((e) => {
+          wrap.querySelector(".ws-assembly-caption").textContent = e.message;
+        })
       );
       wrap.querySelector(".ws-cool-export-step").addEventListener("click", () =>
-        exportFmt("step").catch((e) => { wrap.querySelector(".ws-cooling-status").textContent = e.message; })
+        this._exportChannel("step", wrap).catch((e) => {
+          wrap.querySelector(".ws-assembly-caption").textContent = e.message;
+        })
       );
-      wrap.querySelector(".ws-thermal-run")?.addEventListener("click", () => this._fetchThermal());
 
       this.cooling3dVisible = true;
-      if (this.sectionData) this._applySectionToWrap(wrap);
-      else this._debouncedCooling();
-      this._fetchCooling3d(wrap, { quiet: true });
       if (this._assembly3dCache) {
         assembly3d.setData(this._assembly3dCache);
-        const cap = wrap.querySelector(".ws-assembly-caption");
-        if (cap) cap.textContent = this._assemblyCaption(this._assembly3dCache);
+        wrap.querySelector(".ws-assembly-caption").textContent = this._assemblyCaption(this._assembly3dCache);
       } else {
         this._fetchAssembly3d(wrap, { quiet: true });
       }
+      if (this.sectionData) this._applySectionToWrap(wrap);
+      return wrap;
+    }
+
+    mountThermalPanel(container, editor) {
+      if (this._thermalWrap) return this._thermalWrap;
+      const ed = editor || this.editor;
+      const wrap = document.createElement("div");
+      wrap.className = "workspace-preview workspace-cooling thermal-stage";
+      wrap.innerHTML = `
+        <div class="workspace-loading hidden" aria-live="polite">
+          <div class="workspace-spinner"></div>
+          <span class="ws-loading-msg">Thermal preview…</span>
+        </div>
+        <div class="regen-margin-head">
+          <span class="regen-plot-label">Hot wall vs limit</span>
+          <span class="thermal-fidelity">
+            <button type="button" class="btn-inline ws-fid-preview active">Fast</button>
+            <button type="button" class="btn-inline ws-fid-full">Full</button>
+            <label class="toggle-inline ws-show-vel"><input type="checkbox"> Velocity</label>
+            <span class="ws-station-count"></span>
+          </span>
+        </div>
+        <div class="regen-margin-plot">
+          <canvas class="ws-margin-plot"></canvas>
+        </div>
+        <div class="workspace-canvas-wrap ws-cool-section-view has-viewport-zoom">
+          <canvas class="ws-throat-section"></canvas>
+        </div>
+        <label class="workspace-slider-label">Station
+          <input type="range" class="ws-axial-slider" step="any" />
+          <span class="ws-axial-value">—</span>
+        </label>
+        <div class="thermal-preview-panel">
+          <div class="thermal-kpis"></div>
+          <p class="thermal-note form-hint"></p>
+        </div>
+      `;
+      container.appendChild(wrap);
+      this._thermalWrap = wrap;
+
+      const section = new ThroatSectionCanvas(wrap.querySelector(".ws-throat-section"));
+      const marginPlot = new MarginPlotCanvas(wrap.querySelector(".ws-margin-plot"));
+      mountViewportZoom(wrap.querySelector(".ws-cool-section-view"), () => section);
+      this._instances.set(wrap, { section, marginPlot, wrap, editor: ed });
+      this._mounted.push(section, marginPlot);
+
+      let cursorTimer = 0;
+      marginPlot.onCursor = (x_m, commit) => {
+        this.axialX = x_m;
+        const slider = wrap.querySelector(".ws-axial-slider");
+        const valEl = wrap.querySelector(".ws-axial-value");
+        if (slider) slider.value = x_m;
+        if (valEl) valEl.textContent = x_m.toFixed(4);
+        clearTimeout(cursorTimer);
+        cursorTimer = setTimeout(() => this._fetchCooling(x_m), commit ? 0 : 80);
+      };
+
+      wrap.querySelector(".ws-show-vel input").addEventListener("change", (e) => {
+        marginPlot.showVelocity = e.target.checked;
+        marginPlot.draw();
+      });
+
+      const setFidelity = (fidelity) => {
+        if (this.thermalFidelity === fidelity) return;
+        this.thermalFidelity = fidelity;
+        this._updateThermalPanels();
+        this._fetchThermal();
+      };
+      wrap.querySelector(".ws-fid-preview").addEventListener("click", () => setFidelity("preview"));
+      wrap.querySelector(".ws-fid-full").addEventListener("click", () => setFidelity("full"));
+
+      wrap.querySelector(".ws-axial-slider").addEventListener("input", () => {
+        const x = parseFloat(wrap.querySelector(".ws-axial-slider").value);
+        this.setAxialX(x, { fetch: true });
+      });
+
+      if (this.sectionData) this._applySectionToWrap(wrap);
+      else this._debouncedCooling();
       this._updateThermalPanels();
+      this._debouncedThermal();
       return wrap;
     }
 
