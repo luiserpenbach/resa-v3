@@ -24,31 +24,35 @@ chamber:
   bartz_correction: 1.0
   bartz_correction_tol: 0.3
 cooling:
-  # fit-check block only; matches the regen layout at the throat
+  # fit-check block only; matches the regen layout at the throat (floor width)
   coolant: Hydrogen
-  n_channels: 14
-  channel_width_m: 0.0011
-  channel_height_m: 0.0008
-  rib_width_m: 0.0007
+  n_channels: 26
+  channel_width_m: 0.00064
+  channel_height_m: 0.0003
+  rib_width_m: 0.0004
   inner_wall_thickness_m: 0.0005
-  wall_material: IN718
+  wall_material: GRCop-42
   inlet_T_K: 250
-  inlet_p_bar: 15
+  inlet_p_bar: 25
   correlation: gnielinski
 combustion:
   backend: rocketcea
-  # 7 bar H2/O2 at eps 80: recombination freezes early -> frozen composition
+  # 6 bar H2/O2 at eps 80: recombination freezes early -> frozen composition
   # is the conservative bound (frozen_at_throat is the optimistic alternative)
   nozzle_flow: frozen
   use_delivery_temperatures: true
 operating_point:
   thrust_N: 50
-  pc_bar: 7
-  of_ratio: 4.2
+  # Cooling redesign: fuel-rich O/F 2.5 and 6 bar. Under frozen expansion the
+  # rich mixture costs no Isp (457 s vs 437 s at O/F 4.2), lowers Tc by 600 K
+  # and gives 42 % more hydrogen to cool with; 6 bar cuts the throat heat
+  # flux by ~12 % against a 9 % larger throat.
+  pc_bar: 6
+  of_ratio: 2.5
   eps: 80
   eta_cstar: 0.95
   eta_cf: 0.98
-  eta_cf_source: estimate   # divergence x boundary-layer estimate (throat Re ~ 2.5e4)
+  eta_cf_source: estimate   # divergence x boundary-layer estimate (throat Re ~ 2.4e4)
   p_amb_bar: 0
   pe_bar: null
   eta_cstar_tol: 0.02
@@ -64,8 +68,11 @@ offdesign:
 regen:
   meta:
     name: SPARK-50_regen
-    description: ''
-    version: '0.1'
+    description: >
+      GRCop-42 liner, 26 channels, 0.3 mm high through the throat with 0.4 mm
+      ribs; shallow wide-rib channels in the chamber; GH2 counterflow from
+      eps 40 at 25 bar; C-103 radiation-cooled skirt from eps 40 to 80.
+    version: '0.2'
   contour:
     type: from_engine
   sync:
@@ -81,35 +88,55 @@ regen:
     of_ratio: true
     mdot: true
   channels:
-    count: 14
+    count: 26
     inner_wall_thickness: 0.0005
-    height: 0.0008
+    # RESA frame: throat at x = 0, injector face at about -64 mm, jacket end at
+    # eps 40 (x ~ +43 mm). Throat channels 0.3 mm high for coolant velocity;
+    # chamber channels 0.45 mm high so the warm coolant at the injector end
+    # still runs fast; opening up toward the jacket end where the flux is low.
+    height:
+      - [-0.070, 0.00045]
+      - [-0.022, 0.00045]
+      - [-0.008, 0.0003]
+      - [0.000, 0.0003]
+      - [0.006, 0.0003]
+      - [0.020, 0.00065]
+      - [0.044, 0.0010]
     rib:
-      mode: fixed_width
-      width: 0.0007
+      # variable rib: 0.4 mm at the throat (26 channels x 0.65 mm), widening
+      # in the chamber and nozzle to keep the closeout span near 2 mm
+      mode: variable
+      width:
+        - [-0.070, 0.0016]
+        - [-0.025, 0.0016]
+        - [-0.010, 0.0004]
+        - [0.000, 0.0004]
+        - [0.010, 0.0004]
+        - [0.025, 0.0010]
+        - [0.044, 0.0016]
     helix:
       profile: 0
       interp: pchip
       handedness: right
-    min_channel_width: 0.0008
-    # stop_x: 0.02   # example: end the jacket at ~eps 20 and radiate the rest
+    min_channel_width: 0.0006
+    stop_x: 0.0434            # eps 40; radiation-cooled C-103 skirt beyond
   geometry:
     n_stations: 300
     width_reference: mid_height
   solver:
     enabled: true
     coolant: Hydrogen
-    coolant_side: fuel          # the hydrogen fuel flow (2.2 g/s), not the GOX flow
+    coolant_side: fuel          # the hydrogen fuel flow (3.2 g/s), not the GOX flow
     coolant_correlation: taylor # NASA gaseous-hydrogen correlation
     mdot_from_engine: true
     inlet:
-      pressure_bar: 15
+      pressure_bar: 25          # feed margin ~16 bar over pc x 1.2; keeps coolant Mach < 0.3
       temperature_K: 250
       location: nozzle_end
     hot_gas:
       property_basis: frozen
     wall:
-      material: Inconel 718     # limit and k(T), yield(T) from the material database
+      material: GRCop-42        # 1000 K limit, k(T) and yield(T) from the material database
     skirt:
       enabled: true
       emissivity: 0.8
