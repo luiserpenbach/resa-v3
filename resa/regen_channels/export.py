@@ -91,7 +91,7 @@ def export_artifacts(
         if results is not None:
             f = out_dir / f"{tag}_results_plots.html"
             figure_results(
-                results, lay, cfg.solver.wall.max_wall_temp_K,
+                results, lay, results.attrs.get("wall_limit_K", 1200.0),
             ).write_html(str(f), include_plotlyjs=_PLOTLY_JS)
             files.append(str(f))
             f = out_dir / f"{tag}_coolant_path.html"

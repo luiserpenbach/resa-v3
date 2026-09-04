@@ -1,11 +1,15 @@
-"""Correlations: friction (Churchill, rough), Gnielinski, Jackson
-supercritical, Chen subcooled/nucleate boiling, helix curvature factors,
-rib fin efficiency, Inconel 718 conductivity.
+"""Correlations: friction (Churchill, rough), Gnielinski / laminar rectangular
+duct / Taylor (gaseous hydrogen), Jackson supercritical, Chen subcooled and
+nucleate boiling, helix curvature factors, rib fin efficiency, Inconel 718
+conductivity, and first-order wall stress formulas.
 """
 from __future__ import annotations
 
 import numpy as np
 from CoolProp.CoolProp import PropsSI
+
+RE_LAMINAR = 2300.0
+RE_TURBULENT = 4000.0
 
 
 # ---------------------------------------------------------------- friction
@@ -35,13 +39,48 @@ def curvature_htc_factor(d_over_D: float) -> float:
 
 
 # ----------------------------------------------------------- single phase
+# Shah & London (1978) fully developed laminar Nu, uniform heat flux (H1),
+# rectangular duct, all four walls heated, vs short/long side ratio.
+_RECT_ASPECT = np.array([0.0, 0.125, 0.25, 0.333, 0.5, 0.7, 1.0])
+_RECT_NU_H1 = np.array([8.23, 6.49, 5.33, 4.79, 4.12, 3.73, 3.61])
+
+
+def laminar_nu_rect(aspect: float) -> float:
+    """Laminar Nu for a rectangular duct; aspect = short side / long side."""
+    a = float(np.clip(aspect, 0.0, 1.0))
+    return float(np.interp(a, _RECT_ASPECT, _RECT_NU_H1))
+
+
 def gnielinski(Re: float, Pr: float, f: float) -> float:
-    """Nu for 3e3 < Re < 5e6 (clamped to laminar Nu=4.36 below)."""
-    if Re < 2300.0:
+    """Nu for 3e3 < Re < 5e6 (clamped to laminar circular-tube Nu=4.36 below)."""
+    if Re < RE_LAMINAR:
         return 4.36
     fr = f / 8.0
     nu = fr * (Re - 1000.0) * Pr / (1.0 + 12.7 * np.sqrt(fr) * (Pr ** (2 / 3) - 1.0))
     return max(nu, 4.36)
+
+
+def nu_single_phase(Re: float, Pr: float, f: float, aspect: float = 1.0) -> float:
+    """Single-phase Nu with a laminar rectangular-duct floor and a linear
+    blend across the transition band 2300 < Re < 4000."""
+    nu_lam = laminar_nu_rect(aspect)
+    if Re < RE_LAMINAR:
+        return nu_lam
+    if Re < RE_TURBULENT:
+        w = (Re - RE_LAMINAR) / (RE_TURBULENT - RE_LAMINAR)
+        return (1.0 - w) * nu_lam + w * max(gnielinski(RE_TURBULENT, Pr, f), nu_lam)
+    return max(gnielinski(Re, Pr, f), nu_lam)
+
+
+def taylor_nu(Re: float, Pr: float, T_w: float, T_b: float, x_over_D: float) -> float:
+    """Taylor (NASA TN D-4332, 1968) correlation for gaseous hydrogen with
+    strong wall-to-bulk temperature ratios:
+        Nu_b = 0.023 Re_b^0.8 Pr_b^0.4 (T_w/T_b)^-(0.57 - 1.59 D/x)
+    Bulk properties; x measured from the channel inlet."""
+    xd = max(x_over_D, 2.0)
+    expo = 0.57 - 1.59 / xd
+    ratio = max(T_w / T_b, 1.0)
+    return 0.023 * Re ** 0.8 * Pr ** 0.4 * ratio ** (-expo)
 
 
 # ----------------------------------------------------------- supercritical
@@ -94,3 +133,18 @@ def fin_efficiency(h_c: float, k_wall: float, t_rib: float, height: float):
 def k_inconel718(T: float) -> float:
     """Inconel 718 thermal conductivity [W/m/K], ~300-1300 K linear fit."""
     return float(np.clip(11.4 + 0.013 * (T - 300.0), 9.0, 26.0))
+
+
+# ------------------------------------------------------------ wall stress
+def thermal_stress_MPa(E_GPa: float, alpha_1_K: float, q_W_m2: float,
+                       t_wall_m: float, k_W_mK: float, poisson: float) -> float:
+    """Hot-wall compressive thermal stress from the through-wall gradient
+    (Huzel & Huang eq. 4-27): sigma = E alpha q t / (2 (1 - nu) k)."""
+    return E_GPa * 1e9 * alpha_1_K * q_W_m2 * t_wall_m / (2.0 * (1.0 - poisson) * k_W_mK) / 1e6
+
+
+def pressure_bending_stress_MPa(dp_Pa: float, w_m: float, t_wall_m: float) -> float:
+    """Bending stress in the hot wall spanning one channel under the
+    coolant-minus-gas pressure difference, fixed-fixed beam
+    (Huzel & Huang eq. 4-28): sigma = dp w^2 / (2 t^2)."""
+    return dp_Pa * (w_m / t_wall_m) ** 2 / 2.0 / 1e6

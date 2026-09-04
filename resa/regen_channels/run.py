@@ -43,9 +43,12 @@ def run(config_path: str):
         if a["saturation_reached"]:
             print(f"[{tag}] WARNING: bulk coolant reached saturation — "
                   f"two-phase bulk flow in part of the circuit.")
-        if results.T_wall_hot_K.max() > cfg.solver.wall.max_wall_temp_K:
+        if results.T_wall_hot_K.max() > a["wall_limit_K"]:
             print(f"[{tag}] WARNING: hot wall exceeds "
-                  f"{cfg.solver.wall.max_wall_temp_K:.0f} K limit.")
+                  f"{a['wall_limit_K']:.0f} K limit ({a['wall_limit_source']}).")
+        if a.get("wall_solve_fallbacks"):
+            print(f"[{tag}] WARNING: wall solve fell back at "
+                  f"{a['wall_solve_fallbacks']} station(s).")
 
     files, warnings = export_artifacts(lay, cfg, results, out_dir=out, tag=tag)
     for msg in warnings:

@@ -35,6 +35,19 @@ class PropellantConfig(StrictModel):
     fuel_temp_K: float = Field(gt=0)       # delivered fuel temperature
     cea_oxidizer: Optional[str] = None
     cea_fuel: Optional[str] = None
+    # delivered phase for the CEA enthalpy card (None -> CoolProp phase at pc)
+    ox_phase: Optional[Literal["gas", "liquid"]] = None
+    fuel_phase: Optional[Literal["gas", "liquid"]] = None
+    # 'regen_outlet' feeds the regen coolant outlet temperature back into the
+    # propellant enthalpy (iterated in the pipeline); needs a regen block
+    ox_temp_source: Literal["input", "regen_outlet"] = "input"
+    fuel_temp_source: Literal["input", "regen_outlet"] = "input"
+
+    @model_validator(mode="after")
+    def _one_coupled_side(self) -> "PropellantConfig":
+        if self.ox_temp_source == "regen_outlet" and self.fuel_temp_source == "regen_outlet":
+            raise ValueError("only one propellant can be fed from the regen outlet")
+        return self
 
 
 class CombustionTable(StrictModel):
@@ -46,10 +59,15 @@ class CombustionTable(StrictModel):
     tc_K: Union[float, list[float]]
     gamma: Union[float, list[float]]
     mw_kg_kmol: Union[float, list[float]]
+    # optional chamber transport properties (frozen basis) for the Bartz model
+    mu_pa_s: Optional[Union[float, list[float]]] = None
+    pr: Optional[Union[float, list[float]]] = None
+    cp_J_kgK: Optional[Union[float, list[float]]] = None
 
     @model_validator(mode="after")
     def _shapes(self) -> "CombustionTable":
         vals = [self.cstar_m_s, self.tc_K, self.gamma, self.mw_kg_kmol]
+        vals += [v for v in (self.mu_pa_s, self.pr, self.cp_J_kgK) if v is not None]
         is_list = [isinstance(v, list) for v in vals]
         if any(is_list):
             if not all(is_list) or self.of is None:
@@ -66,14 +84,36 @@ class CombustionTable(StrictModel):
         return self.of is not None
 
 
+NozzleFlow = Literal["single_gamma", "equilibrium", "frozen", "frozen_at_throat"]
+
+
 class CombustionConfig(StrictModel):
     backend: Literal["rocketcea", "table"] = "table"
     table: Optional[CombustionTable] = None
+    # nozzle expansion model for CF / exit state:
+    #   single_gamma     isentropic relations with the chamber gamma (table + CEA)
+    #   equilibrium      CEA shifting-equilibrium expansion (rocketcea only)
+    #   frozen           CEA composition frozen at the chamber (rocketcea only)
+    #   frozen_at_throat CEA equilibrium to the throat, frozen downstream
+    nozzle_flow: NozzleFlow = "single_gamma"
+    # build CEA propellant cards from propellants.*_temp_K / *_phase instead of
+    # rocketcea's default reference states (rocketcea only)
+    use_delivery_temperatures: bool = False
 
     @model_validator(mode="after")
     def _table_required(self) -> "CombustionConfig":
-        if self.backend == "table" and self.table is None:
-            raise ValueError("combustion.backend='table' requires combustion.table")
+        if self.backend == "table":
+            if self.table is None:
+                raise ValueError("combustion.backend='table' requires combustion.table")
+            if self.nozzle_flow != "single_gamma":
+                raise ValueError(
+                    "combustion.nozzle_flow other than 'single_gamma' needs "
+                    "backend='rocketcea' (a table has no nozzle expansion data)"
+                )
+            if self.use_delivery_temperatures:
+                raise ValueError(
+                    "combustion.use_delivery_temperatures needs backend='rocketcea'"
+                )
         return self
 
 
@@ -87,6 +127,9 @@ class OperatingPoint(StrictModel):
     eta_cstar_tol: Optional[float] = Field(default=None, gt=0, lt=0.3)  # ± band
     # nozzle (thrust-coefficient) efficiency: divergence + boundary-layer losses
     eta_cf: float = Field(default=1.0, gt=0.5, le=1.0)
+    # 'estimate' replaces eta_cf by the first-order divergence x boundary-layer
+    # estimate from models/losses.py (iterated with the sizing)
+    eta_cf_source: Literal["input", "estimate"] = "input"
     p_amb_bar: float = Field(default=1.01325, ge=0)
     # optional — omitted -> optimum is computed (provenance records this)
     of_ratio: Optional[float] = Field(default=None, gt=0)   # None -> max-Isp O/F
@@ -142,6 +185,7 @@ class AnalyzePoint(StrictModel):
     eta_cstar_tol: Optional[float] = Field(default=None, gt=0, lt=0.3)  # ± band
     # nozzle (thrust-coefficient) efficiency: divergence + boundary-layer losses
     eta_cf: float = Field(default=1.0, gt=0.5, le=1.0)
+    eta_cf_source: Literal["input", "estimate"] = "input"
     p_amb_bar: float = Field(default=1.01325, ge=0)
 
     @model_validator(mode="after")
@@ -219,6 +263,9 @@ class ChamberConfig(StrictModel):
     # Sutton: entrance fillet radius R / chamber diameter Dc ∈ [0.25, 0.75]
     rc_entrance_factor: float = Field(default=0.5, gt=0, lt=1.5)
     bartz_correction: float = Field(default=0.75, gt=0, le=1.5)
+    # ± band on bartz_correction: the regen solve is repeated at both ends and
+    # the wall-temperature band is reported (uncertainty of the hot-gas model)
+    bartz_correction_tol: Optional[float] = Field(default=None, gt=0, lt=1.0)
     n_stations: int = Field(default=200, ge=20)
     theta_n_deg: Optional[float] = Field(default=None, gt=0, lt=60)
     theta_e_deg: Optional[float] = Field(default=None, ge=0, lt=30)
@@ -301,6 +348,21 @@ class EngineConfig(StrictModel):
         c = self.cooling
         if c.n_channels * (c.channel_width_m + c.rib_width_m) > 1.0:
             raise ValueError("channel layout exceeds 1 m circumference — check units")
+        pr = self.propellants
+        coupled = ("fuel" if pr.fuel_temp_source == "regen_outlet"
+                   else "oxidizer" if pr.ox_temp_source == "regen_outlet" else None)
+        if coupled is not None:
+            if self.regen is None or not self.regen.solver.enabled:
+                raise ValueError(
+                    f"propellants.{'fuel' if coupled == 'fuel' else 'ox'}_temp_source="
+                    "'regen_outlet' needs a regen block with solver.enabled=true"
+                )
+            side = self.regen.solver.coolant_side
+            if side is not None and side != coupled:
+                raise ValueError(
+                    f"propellants.*_temp_source couples the {coupled} temperature to the "
+                    f"regen outlet but regen.solver.coolant_side is '{side}'"
+                )
         if self.film_cooling is not None and self.operating_point is not None:
             of = self.operating_point.of_ratio
             if of is None:
@@ -322,3 +384,12 @@ class EngineConfig(StrictModel):
     @property
     def mode(self) -> str:
         return "design" if self.operating_point is not None else "analyze"
+
+    @property
+    def coupled_temperature_side(self) -> Optional[str]:
+        pr = self.propellants
+        if pr.fuel_temp_source == "regen_outlet":
+            return "fuel"
+        if pr.ox_temp_source == "regen_outlet":
+            return "oxidizer"
+        return None

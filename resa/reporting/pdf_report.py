@@ -128,8 +128,11 @@ def _summary_section(story, styles, res: EngineResult) -> None:
          p["mdot"]],
         [f"c* effective (eta={tc.eta_cstar:.2f})",
          f"{tc.cstar_eff_m_s:.1f} m/s", "calculated"],
-        ["C_F", f"{tc.cf:.4f}", "calculated"],
+        ["C_F", f"{tc.cf:.4f}", f"calculated ({tc.cf_source})"],
+        ["eta_CF", f"{tc.eta_cf:.4f}", p.get("eta_cf", "input")],
         ["Isp", f"{tc.isp_s:.2f} s", "calculated"],
+        ["Isp vacuum, ideal (no eta)",
+         f"{tc.isp_vac_ideal_s:.2f} s" if tc.isp_vac_ideal_s else "-", tc.cf_source],
         ["Exit pressure", f"{tc.pe_bar:.3f} bar", "calculated"],
         ["Exit Mach", f"{tc.exit_mach:.3f}", "calculated"],
         ["Throat radius", f"{tc.throat_radius_m * 1e3:.2f} mm", p["geometry"]],
@@ -221,7 +224,10 @@ def _inputs_section(story, styles, cfg: EngineConfig) -> None:
 
     c = cfg.cooling
     story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("Cooling (sanity-check layout)", styles["h2"]))
+    story.append(Paragraph(
+        "Cooling block (throat fit check only" +
+        (" - the regen block below drives the solver)" if cfg.regen is not None else ")"),
+        styles["h2"]))
     story.append(_kv_table([
         ("Coolant", c.coolant),
         ("Channels", str(c.n_channels)),
@@ -231,20 +237,81 @@ def _inputs_section(story, styles, cfg: EngineConfig) -> None:
         ("Wall thickness", f"{c.inner_wall_thickness_m * 1e3:.2f} mm"),
         ("Inlet T / p", f"{c.inlet_T_K:.1f} K / {c.inlet_p_bar:.1f} bar"),
     ]))
+    if cfg.regen is not None:
+        rs = cfg.regen.solver
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("Regen block (solver input)", styles["h2"]))
+        story.append(_kv_table([
+            ("Coolant / side", f"{rs.coolant} / {rs.coolant_side or 'inferred from species'}"),
+            ("Channels", str(cfg.regen.channels.count)),
+            ("Coolant correlation", rs.coolant_correlation),
+            ("Inlet T / p", f"{rs.inlet.temperature_K:.1f} K / {rs.inlet.pressure_bar:.1f} bar"
+             f" ({rs.inlet.location})"),
+            ("Wall material", rs.wall.material),
+            ("Bartz correction", f"{rs.hot_gas.bartz_correction:g}"
+             + (f" +/- {rs.hot_gas.bartz_correction_tol:g}" if rs.hot_gas.bartz_correction_tol else "")),
+            ("Hot-gas property basis", rs.hot_gas.property_basis),
+        ]))
     story.append(PageBreak())
 
 
 def _combustion_section(story, styles, res: EngineResult) -> None:
     comb = res.combustion
     story.append(Paragraph("Combustion properties (nominal O/F)", styles["h1"]))
-    story.append(_kv_table([
+    rows = [
         ("Source", comb.source),
+        ("Oxidizer state", comb.ox_state or "-"),
+        ("Fuel state", comb.fuel_state or "-"),
+        ("Nozzle expansion model", comb.nozzle_flow),
         ("Ideal c*", f"{comb.cstar_ideal_m_s:.1f} m/s"),
         ("Chamber temperature Tc", f"{comb.tc_K:.1f} K"),
-        ("Gamma", f"{comb.gamma:.4f}"),
+        ("Gamma (chamber)", f"{comb.gamma:.4f}"),
         ("Mean molecular weight", f"{comb.mw_kg_kmol:.3f} kg/kmol"),
         ("R specific", f"{comb.R_specific:.1f} J/kg/K"),
-    ]))
+    ]
+    if comb.has_transport:
+        rows += [
+            ("Viscosity (chamber)", f"{comb.mu_Pa_s:.3e} Pa s"),
+            ("cp frozen / equilibrium",
+             f"{comb.cp_frozen_J_kgK:.0f} / {comb.cp_eq_J_kgK or float('nan'):.0f} J/kg/K"),
+            ("Pr frozen / equilibrium",
+             f"{comb.pr_frozen:.3f} / {comb.pr_eq or float('nan'):.3f}"),
+        ]
+    story.append(_kv_table(rows))
+    nr = res.nozzle_reference
+    if nr is not None:
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(f"Ideal vacuum Isp band at eps = {nr.eps:.1f} (no efficiencies)", styles["h2"]))
+        story.append(_kv_table([
+            ("Single-gamma", f"{nr.isp_vac_single_gamma_s:.1f} s"),
+            ("CEA equilibrium", f"{nr.isp_vac_equilibrium_s:.1f} s"),
+            ("CEA frozen at throat", f"{nr.isp_vac_frozen_at_throat_s:.1f} s"),
+            ("CEA frozen", f"{nr.isp_vac_frozen_s:.1f} s"),
+            ("Selected model", nr.selected),
+        ]))
+    est = res.losses
+    if est is not None:
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("Nozzle losses (first-order estimate)", styles["h2"]))
+        story.append(_kv_table([
+            ("Throat Reynolds number", f"{est.re_throat:.3e}"),
+            ("Wall-shear thrust loss", f"{est.bl_loss_fraction * 100:.2f} %"),
+            ("Laminar fraction of wetted length", f"{est.laminar_fraction * 100:.0f} %"),
+            ("Divergence efficiency", f"{est.divergence_efficiency:.4f}"),
+            ("eta_CF estimate / used", f"{est.eta_cf_estimate:.4f} / {est.eta_cf_used:.4f}"),
+            ("Method", est.method),
+        ]))
+    cp = res.coupling
+    if cp is not None:
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("Coupling loop", styles["h2"]))
+        story.append(_kv_table([
+            ("Iterations", f"{cp.iterations} ({'converged' if cp.converged else 'NOT converged'})"),
+            ("Fuel / ox temperature used", f"{cp.fuel_temp_K:.1f} K / {cp.ox_temp_K:.1f} K"),
+            ("Regen outlet feeds", f"{cp.coupled_side or '-'}"
+             + (f" ({cp.regen_outlet_T_K:.1f} K)" if cp.regen_outlet_T_K else "")),
+            ("eta_CF", f"{cp.eta_cf:.4f}" if cp.eta_cf is not None else "input"),
+        ]))
     story.append(Spacer(1, 6 * mm))
 
 
@@ -317,14 +384,41 @@ def _regen_section(story, styles, res: EngineResult, cfg: EngineConfig) -> None:
     story.append(Paragraph("Regen cooling analysis", styles["h1"]))
     if rg.results is not None:
         s = rg.summary()
-        story.append(_kv_table([
+        a = rg.results.attrs
+        rows = [
             ("Tag", rg.tag),
+            ("Coolant side / flow", f"{s['coolant_side'] or '?'} / {s['mdot_coolant_kg_s'] * 1e3:.2f} g/s"),
+            ("Hot-gas properties", str(a.get("hot_gas_property_note", ""))),
             ("Total heat load Q", f"{s['Q_total_kW']:.2f} kW"),
             ("Pressure drop", f"{s['dp_bar']:.3f} bar"),
             ("Outlet state", f"{s['outlet_T_K']:.1f} K / {s['outlet_p_bar']:.1f} bar"),
             ("Max hot wall temperature", f"{s['T_wall_max_K']:.0f} K"),
+            ("Wall limit / margin",
+             f"{s['T_wall_limit_K']:.0f} K ({a.get('wall_limit_source')}) / {s['wall_margin_K']:.0f} K"),
+            ("Coolant Re range", f"{rg.results.Re.min():.0f} - {rg.results.Re.max():.0f}"),
+            ("Coolant Mach max", f"{s['coolant_mach_max']:.3f}"),
             ("Saturation reached", "yes" if s.get("saturation_reached") else "no"),
-        ]))
+            ("Wall-solve fallbacks", str(s.get("wall_solve_fallbacks", 0))),
+        ]
+        if rg.band is not None:
+            rows.append(("T_wall,max band (Bartz +/- tol)",
+                         f"{rg.band['lo']['T_wall_max_K']:.0f} - {rg.band['hi']['T_wall_max_K']:.0f} K"
+                         f" (tol {rg.band['tol']:g})"))
+        if "stress_ratio_max" in s:
+            rows.append(("Hot-wall stress / yield (first-order)",
+                         f"{s['sigma_max_MPa']:.0f} MPa, ratio {s['stress_ratio_max']:.2f}, "
+                         f"strain {s['thermal_strain_max'] * 100:.2f} %"))
+        if rg.feed_budget is not None:
+            fb = rg.feed_budget
+            rows.append(("Feed-pressure margin",
+                         f"{fb['margin_bar']:.2f} bar (outlet {fb['outlet_p_bar']:.2f} vs required "
+                         f"{fb['required_p_bar']:.2f} bar)"))
+        if rg.skirt is not None:
+            sk = rg.skirt.attrs
+            rows.append(("Radiation-cooled skirt",
+                         f"T_wall {sk['T_wall_max_K']:.0f} K max, {sk['T_wall_exit_K']:.0f} K at exit, "
+                         f"{sk['Q_radiated_kW']:.2f} kW radiated"))
+        story.append(_kv_table(rows))
     if cfg.regen is not None:
         story.append(Spacer(1, 4 * mm))
         story.append(Paragraph("Regen sync flags", styles["h2"]))
@@ -460,7 +554,7 @@ def write_pdf_report(
             _plot_page(
                 story, styles, "Regen thermal-hydraulic results",
                 pdf_plots.regen_results_figure(
-                    res.regen.results, cfg.regen.solver.wall.max_wall_temp_K,
+                    res.regen.results, res.regen.results.attrs.get("wall_limit_K", 1200.0),
                 ),
             )
 

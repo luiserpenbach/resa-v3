@@ -182,6 +182,13 @@ Top-level keys for a full engine definition:
 | `fuel_temp_K` | float > 0 | yes | Delivered fuel temperature [K] |
 | `cea_oxidizer` | string | no | CEA oxidizer name if different from CoolProp |
 | `cea_fuel` | string | no | CEA fuel name if different from CoolProp |
+| `ox_phase` / `fuel_phase` | `gas` \| `liquid` | no | Delivered phase for the CEA enthalpy card (default: CoolProp phase at pc) |
+| `ox_temp_source` / `fuel_temp_source` | `input` \| `regen_outlet` | no | `regen_outlet` feeds the regen coolant outlet temperature back into this propellant's enthalpy (iterated; needs a regen block whose coolant is this propellant) |
+
+`ox_temp_K` / `fuel_temp_K` only affect combustion when
+`combustion.use_delivery_temperatures: true` (rocketcea). Without it CEA runs
+on its default reference states (LOX 90 K, LH2 20 K, ...) and the report warns
+when those differ from the configured temperatures.
 
 ---
 
@@ -191,6 +198,13 @@ Top-level keys for a full engine definition:
 |-------|------|---------|-------------|
 | `backend` | `"table"` \| `"rocketcea"` | `"table"` | Property source |
 | `table` | object | — | Required when `backend: table` |
+| `nozzle_flow` | `single_gamma` \| `equilibrium` \| `frozen` \| `frozen_at_throat` | `single_gamma` | Nozzle expansion model for C_F, exit pressure and exit Mach. `single_gamma` applies the isentropic relations with the chamber gamma (only option for tables). The CEA modes (rocketcea) expand with shifting equilibrium, composition frozen at the chamber (conservative; c* is the frozen value too) or equilibrium to the throat then frozen. |
+| `use_delivery_temperatures` | bool | `false` | Build CEA propellant cards at `propellants.*_temp_K` / `*_phase` (enthalpy shifted from the reference card with CoolProp) instead of rocketcea's defaults |
+
+Every rocketcea run also reports the **ideal vacuum Isp band** (single-gamma,
+equilibrium, frozen-at-throat, frozen) and warns when the single-gamma value
+departs from CEA equilibrium by more than 2 % or when, below 15 bar, the
+equilibrium-frozen spread suggests early kinetic freezing.
 
 #### `combustion.table`
 
@@ -204,6 +218,9 @@ plus `of`). A table is required for O/F optimization and off-design sweeps.
 | `tc_K` | float \| list | Chamber temperature [K] |
 | `gamma` | float \| list | Ratio of specific heats |
 | `mw_kg_kmol` | float \| list | Mean molecular weight [kg/kmol] |
+| `mu_pa_s` | float \| list | optional chamber viscosity [Pa·s] (frozen) for the Bartz model |
+| `pr` | float \| list | optional chamber Prandtl number (frozen) |
+| `cp_J_kgK` | float \| list | optional chamber cp [J/kg/K] (frozen) |
 
 All list fields must have the same length as `of`.
 
@@ -217,7 +234,8 @@ All list fields must have the same length as `of`.
 | `pc_bar` | float | — | > 0 | Target chamber pressure [bar] |
 | `eta_cstar` | float | — | 0.5–1.0 | Combustion efficiency on c* |
 | `eta_cstar_tol` | float | null | 0–0.3 | ± band for uncertainty re-runs |
-| `eta_cf` | float | 1.0 | 0.5–1.0 | Nozzle thrust-coefficient efficiency |
+| `eta_cf` | float | 1.0 | 0.5–1.0 | Nozzle thrust-coefficient efficiency (multiplies the whole C_F incl. the ambient term) |
+| `eta_cf_source` | `input` \| `estimate` | `input` | `estimate` replaces `eta_cf` by the first-order divergence × boundary-layer estimate (throat Reynolds number, flat-plate wall shear integral over the contour), iterated with the sizing |
 | `p_amb_bar` | float | 1.01325 | ≥ 0 | Ambient pressure [bar] |
 | `of_ratio` | float | null | > 0 | Fixed O/F; omit → max-Isp optimum |
 | `pe_bar` | float | null | > 0, < pc | Fixed exit pressure [bar] |
@@ -252,7 +270,12 @@ Give exactly one of `eps` or `exit_diameter_m`.
 | `eta_cstar` | float | — | 0.5–1.0 | Combustion efficiency on c* |
 | `eta_cstar_tol` | float | null | 0–0.3 | ± band for uncertainty re-runs |
 | `eta_cf` | float | 1.0 | 0.5–1.0 | Nozzle thrust-coefficient efficiency |
+| `eta_cf_source` | `input` \| `estimate` | `input` | as in design mode |
 | `p_amb_bar` | float | 1.01325 | ≥ 0 | Ambient pressure [bar] |
+
+The pipeline always computes the loss estimate (throat Re, wall-shear loss,
+divergence efficiency) and warns when the throat Reynolds number is below
+1e5 or when a configured `eta_cf` is more than 0.01 above the estimate.
 
 ---
 
@@ -271,6 +294,7 @@ Controls Rao/Bell (or conical) contour generation.
 | `rt_downstream_factor` | float | 0.382 | > 0 | Downstream throat arc R / R_t |
 | `rc_entrance_factor` | float | 0.5 | 0–1.5 | Cylinder→convergent fillet R / D_c |
 | `bartz_correction` | float | 0.75 | 0–1.5 | Small-engine Bartz correction (also synced to regen) |
+| `bartz_correction_tol` | float | null | 0–1 | ± band on the Bartz factor: the regen solve is repeated at both ends and the wall-temperature band is reported |
 | `n_stations` | int | 200 | ≥ 20 | Contour discretisation points |
 | `theta_n_deg` | float | null | 0–60 | Bell initial angle; omit → calculated |
 | `theta_e_deg` | float | null | 0–30 | Bell exit angle; omit → calculated |
@@ -280,7 +304,11 @@ Controls Rao/Bell (or conical) contour generation.
 ### `cooling`
 
 Simple regen layout used for pipeline sanity checks (circumference fit). Not the
-high-fidelity regen solver — use the `regen:` block for that.
+high-fidelity regen solver — use the `regen:` block for that. When a `regen:`
+block exists the pipeline warns if this block disagrees with the regen layout
+(channel count, throat width, height, wall) so reports cannot show the wrong
+channel geometry; `correlation` and `mdot_coolant_kg_s` are accepted for
+compatibility but not used.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -454,13 +482,22 @@ keep the regen YAML value instead of the engine result.
 | `hot_gas_tc_K` | Sync Tc | `combustion.tc_K` |
 | `hot_gas_gamma` | Sync γ | `combustion.gamma` |
 | `hot_gas_mol_mass_kg_kmol` | Sync MW | `combustion.mw_kg_kmol` |
-| `hot_gas_c_star_m_s` | Sync c* | `combustion.cstar_ideal_m_s` |
-| `hot_gas_bartz_correction` | Sync Bartz factor | `chamber.bartz_correction` |
+| `hot_gas_c_star_m_s` | Sync c* | `thrust_chamber.cstar_eff_m_s` (effective c*: pc/c* is the real throat mass flux) |
+| `hot_gas_bartz_correction` | Sync Bartz factor and its ± band | `chamber.bartz_correction`, `chamber.bartz_correction_tol` |
+| `hot_gas_transport` | Sync cp, μ, Pr for Bartz | CEA chamber transport (`hot_gas.property_basis`), or the table's optional columns |
+| `hot_gas_throat_curvature` | Sync Bartz throat curvature | mean of `chamber.rt_upstream_factor` and `rt_downstream_factor` (× R_t) |
 | `of_ratio` | Sync O/F | `thrust_chamber.of_ratio` |
 | `mdot` | Sync coolant mdot from engine | `mdot_ox` or `mdot_fuel` (see `coolant_side`) |
 
-**Never synced from RESA** (always from regen YAML): `hot_gas.mu_pa_s`,
-`hot_gas.pr`, all channel geometry, inlet, wall, roughness settings.
+**Never synced from RESA** (always from regen YAML): all channel geometry,
+inlet, wall, roughness, correlation and skirt settings.
+
+**Coolant side.** `solver.coolant_side` may be omitted when regen is attached
+to an engine: it is inferred from `solver.coolant` against
+`propellants.fuel` / `propellants.oxidizer` (aliases such as `H2`, `GOX`,
+`N2O` are understood). A coolant that matches neither, a `coolant_side` that
+contradicts the species, or a coolant flow (`coolant_fraction`, `mdot_total`)
+larger than that propellant's engine flow are hard errors.
 
 **Legacy:** `solver.mdot_from_engine: false` automatically sets `sync.mdot: false`.
 When `sync.mdot: false`, you must set `solver.mdot_total` [kg/s].
@@ -539,12 +576,16 @@ constant β = spiral, breakpoints = axial ↔ spiral switching.
 | `mdot_total` | float | null | Fixed total coolant flow [kg/s] (all channels) |
 | `mdot_from_engine` | bool | true | Legacy alias for `sync.mdot` |
 | `of_ratio` | float | 4.0 | O/F for legacy mdot split when `mdot_total` unset |
-| `coolant_side` | string | `"oxidizer"` | `oxidizer` or `fuel` — which engine mdot to use when syncing |
-| `coolant_fraction` | float | null | Override: `mdot = fraction × mdot_total_engine` (e.g. H2 fuel regen) |
+| `coolant_side` | string | null | `oxidizer` or `fuel` — which engine mdot cools the chamber. Inferred from the coolant species when attached to an engine; required for standalone runs without `mdot_total` |
+| `coolant_fraction` | float | null | Override: `mdot = fraction × mdot_total_engine`; must not exceed the side's flow |
+| `coolant_correlation` | `auto` \| `gnielinski` \| `taylor` | `auto` | `auto`/`gnielinski`: Gnielinski with a laminar rectangular-duct floor (Shah & London, aspect-ratio dependent) and a 2300–4000 transition blend, Jackson at supercritical pressure, Chen when boiling. `taylor`: NASA gaseous-hydrogen correlation with the wall/bulk temperature ratio (use for GH2 regen) |
+| `max_coolant_mach` | float | 0.3 | Warning threshold on the coolant Mach number |
+| `injector_dp_fraction` | float | 0.2 | Feed budget: the coolant outlet pressure must cover `pc × (1 + fraction)`; a shortfall is a warning and the margin is reported |
 | `inlet` | object | — | Coolant inlet boundary condition |
 | `roughness` | float | 8e-6 | Wall roughness [m] |
 | `curvature_enhancement` | bool | true | Helix curvature on HTC and friction |
-| `max_iter_wall` | int | 80 | Wall temperature iteration limit |
+| `max_iter_wall` | int | 200 | Wall temperature iteration limit. A wall balance that fails to bracket falls back to a bracket end **and** is counted (`wall_solve_fallbacks`) and warned about |
+| `skirt` | object | enabled | Radiation-cooled extension past `channels.stop_x` (below) |
 
 #### `solver.hot_gas`
 
@@ -554,18 +595,39 @@ constant β = spiral, breakpoints = axial ↔ spiral switching.
 | `tc_K` | float | 2950 | Chamber temperature [K] |
 | `gamma` | float | 1.22 | Ratio of specific heats |
 | `mol_mass_kg_kmol` | float | 26 | Mean molecular weight [kg/kmol] |
-| `mu_pa_s` | float | 9e-5 | Gas viscosity at chamber conditions [Pa·s] |
-| `pr` | float | null | Prandtl number; default 4γ/(9γ−5) |
-| `c_star_m_s` | float | 1580 | Ideal c* [m/s] |
+| `mu_pa_s` | float | null | Gas viscosity at chamber conditions [Pa·s]; null → synced from CEA, else 9e-5 fallback (warned) |
+| `pr` | float | null | Prandtl number; null → synced from CEA, else Eucken 4γ/(9γ−5) fallback (warned) |
+| `cp_J_kgK` | float | null | Gas cp for Bartz; null → synced from CEA, else γR/(γ−1) fallback (warned) |
+| `property_basis` | `frozen` \| `equilibrium` | `frozen` | Which CEA property set feeds Bartz. Equilibrium cp/Pr include recombination in the boundary layer and give up to ~2× the heat transfer coefficient for H2/O2 — an upper bound |
+| `c_star_m_s` | float | 1580 | c* for the throat mass flux pc/c* (effective c* when synced) [m/s] |
 | `bartz_correction` | float | 0.75 | Small-engine Bartz multiplier |
+| `bartz_correction_tol` | float | null | ± band; the solve is repeated at both ends |
+| `throat_curvature_factor` | float | 0.941 | Bartz throat radius of curvature as a multiple of the throat **radius** (mean of the 1.5 R_t / 0.382 R_t arcs); synced from the chamber arcs |
 
 #### `solver.wall`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `material` | string | `"Inconel 718"` | Material label |
-| `conductivity` | float \| `"inconel718"` | `"inconel718"` | Constant [W/m/K] or temperature-dependent fit |
-| `max_wall_temp_K` | float | 1200 | Report warning threshold [K] |
+| `material` | string | `"Inconel 718"` | Looked up in the material database: IN718, IN625, SS316L, CuCrZr, GRCop-42, C-103, copper (aliases accepted) |
+| `conductivity` | float \| string | null | Constant [W/m/K], the legacy `inconel718` fit, or null → k(T) from the database |
+| `max_wall_temp_K` | float | null | Hot-wall limit; null → the material's service limit from the database (IN718 1000 K, CuCrZr 800 K, C-103 1600 K, … ; 1200 K if unknown) |
+| `yield_MPa`, `E_GPa`, `alpha_1_K`, `poisson` | float | null | Structural overrides (database values otherwise) |
+| `stress_check` | bool | true | First-order Huzel & Huang hot-wall stress: through-wall thermal stress + pressure bending across the channel span vs yield at the hot-face temperature, plus the hot-face thermal strain (LCF driver). Per-station columns in the results CSV |
+| `stress_ratio_warn` | float | 1.0 | Warn above this stress/yield ratio (thin regen walls normally yield at the throat) |
+
+#### `solver.skirt`
+
+Radiation-cooled nozzle extension downstream of `channels.stop_x`. The wall
+settles where Bartz convection equals grey-body radiation to the environment;
+conduction along the skirt is neglected. Results go to `<tag>_skirt.csv`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | true | Solve the skirt when channels stop before the exit |
+| `emissivity` | float | 0.8 | Outer-surface emissivity |
+| `T_env_K` | float | 300 | Environment temperature (4 K deep space, ~300 K test cell) |
+| `material` | string | null | Skirt material for the temperature limit (e.g. `C-103`) |
+| `max_wall_temp_K` | float | null | Overrides the material limit |
 
 #### `solver.inlet`
 
@@ -751,6 +813,20 @@ Written to the same folder with prefix `<meta.name>_`:
 
 ---
 
+## Report additions
+
+Every run reports, next to the key results: the CEA propellant states actually
+used, the nozzle expansion model and C_F source, the ideal vacuum Isp band
+(rocketcea), the nozzle loss estimate (throat Re, wall-shear loss, divergence,
+η_CF estimate vs used) and, when enabled, the coupling loop (regen outlet →
+propellant temperature, estimated η_CF). Regen sections add the coolant side
+and flow, the layout the solver used, the Bartz factor/property basis, the
+wall limit and its source, the Bartz ± band, the wall stress ratio and thermal
+strain, the coolant Re/Mach range, the feed-pressure margin and the
+radiation-cooled skirt temperatures.
+
+---
+
 ## Provenance tags
 
 Reports label each quantity with how it was determined:
@@ -761,6 +837,8 @@ Reports label each quantity with how it was determined:
 | `calculated` | Derived from other quantities |
 | `optimized: max Isp` | O/F chosen by tool |
 | `optimized: pe = p_amb` | Expansion ratio chosen by tool |
+| `estimated: ...` | First-order model estimate (e.g. η_CF from the loss model) |
+| `cf`: `single_gamma` / `cea_equilibrium` / `cea_frozen` / `cea_frozen_at_throat` | How the ideal C_F was obtained |
 | `calculated (from mdots)` | O/F from measured flows (analyze) |
 | `calculated (from exit dia)` | ε from measured exit diameter |
 

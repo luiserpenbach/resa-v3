@@ -1,8 +1,18 @@
 """Hot-gas side: 1D isentropic Mach from area ratio + Bartz film coefficient.
 
-Gas properties (Tc, gamma, M, mu, Pr, c*) come from the YAML — plug CEA
-values in. A small-engine correction factor multiplies Bartz (default 0.75,
-consistent with E2 throat heat-flux anchoring).
+Gas properties (Tc, gamma, M, cp, mu, Pr, c*) come from the config — synced
+from the engine's CEA run when regen is attached to an engine config. A
+small-engine correction factor multiplies Bartz.
+
+Bartz (1957):
+    h_g = 0.026 / Dt^0.2 * (mu^0.2 cp / Pr^0.6) * (pc / c*)^0.8
+          * (Dt / r_curv)^0.1 * (At / A)^0.9 * sigma(T_w, M)
+
+* pc / c* is the throat mass flux: use the EFFECTIVE c* of the real engine.
+* r_curv is the throat radius of curvature, ``throat_curvature_factor * Rt``.
+* cp, mu, Pr: CEA chamber transport properties (frozen or equilibrium basis).
+  Without them the legacy fallbacks (mu 9e-5 Pa s, Eucken Pr = 4g/(9g-5),
+  cp = g R/(g-1)) are used and flagged in ``property_note``.
 """
 from __future__ import annotations
 
@@ -10,6 +20,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 R_UNIV = 8314.462618
+MU_FALLBACK = 9.0e-5
 
 
 class HotGas:
@@ -20,9 +31,24 @@ class HotGas:
         self.g = cfg.gamma
         self.M_mol = cfg.mol_mass_kg_kmol
         self.R = R_UNIV / self.M_mol
-        self.cp = self.g * self.R / (self.g - 1.0)
-        self.mu = cfg.mu_pa_s
-        self.Pr = cfg.pr if cfg.pr is not None else 4 * self.g / (9 * self.g - 5)
+        notes = []
+        if cfg.cp_J_kgK is not None:
+            self.cp = cfg.cp_J_kgK
+        else:
+            self.cp = self.g * self.R / (self.g - 1.0)
+            notes.append("cp = gamma R/(gamma-1)")
+        if cfg.mu_pa_s is not None:
+            self.mu = cfg.mu_pa_s
+        else:
+            self.mu = MU_FALLBACK
+            notes.append(f"mu = {MU_FALLBACK:g} Pa s default")
+        if cfg.pr is not None:
+            self.Pr = cfg.pr
+        else:
+            self.Pr = 4 * self.g / (9 * self.g - 5)
+            notes.append("Pr = Eucken 4g/(9g-5)")
+        self.property_note = "; ".join(notes) if notes else f"CEA {cfg.property_basis} transport"
+        self.uses_fallback_properties = bool(notes)
         self.cstar = cfg.c_star_m_s
         self.corr = cfg.bartz_correction
         self.At, self.Dt = A_throat, D_throat

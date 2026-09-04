@@ -107,21 +107,62 @@ class GeometryCfg(BaseModel):
 
 # ----------------------------------------------------------------- solver
 class HotGasCfg(BaseModel):
-    """Replace defaults with CEA values for the real design point."""
+    """Replace defaults with CEA values for the real design point. When regen
+    runs through the engine pipeline every field is synced from the engine
+    result unless the matching ``sync`` flag is off."""
     pc_bar: float = 25.0
     tc_K: float = 2950.0
     gamma: float = 1.22
     mol_mass_kg_kmol: float = 26.0
-    mu_pa_s: float = 9.0e-5        # chamber-condition viscosity
-    pr: Optional[float] = None     # default: 4*gamma / (9*gamma - 5)
+    # transport properties for Bartz. None -> synced from the engine's
+    # combustion model (CEA transport) when available, else the legacy
+    # fallbacks (mu 9e-5 Pa s, Eucken Pr, cp = gamma R / (gamma - 1)) with a warning.
+    mu_pa_s: Optional[float] = None
+    pr: Optional[float] = None
+    cp_J_kgK: Optional[float] = None
+    # which CEA property set feeds Bartz: frozen (classic, conservative on Pr)
+    # or equilibrium (includes recombination in cp/k; upper bound on h_g)
+    property_basis: Literal["frozen", "equilibrium"] = "frozen"
+    # throat-region c* for the mass flux pc / c* (effective c* when synced)
     c_star_m_s: float = 1580.0
     bartz_correction: float = 0.75  # small-engine correction factor
+    # ± band on bartz_correction (regen solved at both ends -> T_wall band)
+    bartz_correction_tol: Optional[float] = Field(default=None, gt=0, lt=1.0)
+    # Bartz throat radius of curvature as a multiple of the throat RADIUS.
+    # Default = mean of the 1.5 Rt upstream and 0.382 Rt downstream arcs.
+    throat_curvature_factor: float = Field(default=0.941, gt=0)
 
 
 class WallCfg(BaseModel):
+    """Hot-wall material. ``material`` is looked up in
+    ``regen_channels.materials`` (IN718, IN625, SS316L, CuCrZr, GRCop-42,
+    C-103, copper). Explicit fields override the database."""
     material: str = "Inconel 718"
-    conductivity: Union[float, Literal["inconel718"]] = "inconel718"
-    max_wall_temp_K: float = 1200.0   # flag threshold in reports
+    # constant [W/m/K], the legacy 'inconel718' fit, or None -> material DB k(T)
+    conductivity: Optional[Union[float, str]] = None
+    # None -> material service limit from the database (1200 K if unknown)
+    max_wall_temp_K: Optional[float] = None
+    # structural overrides (None -> database); stress check needs all four
+    yield_MPa: Optional[float] = None
+    E_GPa: Optional[float] = None
+    alpha_1_K: Optional[float] = None
+    poisson: Optional[float] = None
+    stress_check: bool = True
+    # warn when (thermal + pressure) hot-wall stress / yield exceeds this; thin
+    # regen walls normally yield at the throat (plastic, LCF-governed), so a
+    # value > 1 lets you flag only the gross cases
+    stress_ratio_warn: float = Field(default=1.0, gt=0)
+
+
+class SkirtCfg(BaseModel):
+    """Radiation-cooled nozzle extension downstream of ``channels.stop_x``:
+    the wall settles where Bartz convection equals grey-body radiation to the
+    environment. Conduction along the skirt is neglected."""
+    enabled: bool = True
+    emissivity: float = Field(default=0.8, gt=0, le=1.0)
+    T_env_K: float = Field(default=300.0, ge=0)   # 4 K deep space, ~300 K test cell
+    material: Optional[str] = None                # for the temperature limit
+    max_wall_temp_K: Optional[float] = None       # overrides the material limit
 
 
 class CoolantInletCfg(BaseModel):
@@ -146,14 +187,25 @@ class SolverCfg(BaseModel):
     mdot_total: Optional[float] = None   # kg/s through ALL channels
     mdot_from_engine: bool = True        # legacy alias for sync.mdot
     of_ratio: float = 4.0
-    coolant_side: Literal["oxidizer", "fuel"] = "oxidizer"
+    # which propellant flow cools the chamber. None -> inferred from the
+    # coolant species vs the engine propellants (must match one of them);
+    # standalone runs without mdot_total must set it explicitly.
+    coolant_side: Optional[Literal["oxidizer", "fuel"]] = None
     coolant_fraction: Optional[float] = None  # override mdot = fraction * mdot_total
     inlet: CoolantInletCfg = CoolantInletCfg(pressure_bar=60.0,
                                              temperature_K=278.0)
     roughness: float = 8.0e-6            # LPBF as-built wall roughness [m]
     curvature_enhancement: bool = True   # helix curvature on HTC & friction
+    # auto: Gnielinski (laminar rectangular-duct floor, transition blend) with
+    #       Jackson at supercritical pressure and Chen when boiling
+    # taylor: NASA gaseous-hydrogen correlation (wall/bulk temperature ratio)
+    coolant_correlation: Literal["auto", "gnielinski", "taylor"] = "auto"
+    max_coolant_mach: float = Field(default=0.3, gt=0)   # warning threshold
+    # feed-pressure budget: outlet pressure must cover pc (1 + fraction)
+    injector_dp_fraction: float = Field(default=0.2, ge=0)
     max_iter_wall: int = 200             # brentq iterations per wall solve
     film: Optional[FilmCfg] = None       # synced from engine film_cooling
+    skirt: SkirtCfg = SkirtCfg()         # uncooled extension past stop_x
 
 
 class ExportCfg(BaseModel):
@@ -193,8 +245,10 @@ class EngineSyncCfg(BaseModel):
     hot_gas_tc_K: bool = True
     hot_gas_gamma: bool = True
     hot_gas_mol_mass_kg_kmol: bool = True
-    hot_gas_c_star_m_s: bool = True
-    hot_gas_bartz_correction: bool = True
+    hot_gas_c_star_m_s: bool = True          # effective c* (pc / c*_eff = throat mass flux)
+    hot_gas_bartz_correction: bool = True    # incl. bartz_correction_tol
+    hot_gas_transport: bool = True           # cp, mu, Pr from CEA (property_basis)
+    hot_gas_throat_curvature: bool = True    # from chamber rt_*_factor arcs
     of_ratio: bool = True
     mdot: bool = True
 

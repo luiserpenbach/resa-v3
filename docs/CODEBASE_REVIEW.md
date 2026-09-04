@@ -1,5 +1,25 @@
 # RESA v3 — Codebase Analysis & Review
 
+> **Physics pass (Spark-50 review):** a later review against the 50 N
+> GOX/GH2 vacuum thruster found and fixed: regen `coolant_side` defaulting to
+> the oxidizer flow (now inferred from the coolant species, with a flow guard);
+> single-gamma nozzle expansion over-predicting C_F for dissociating gas at high
+> area ratio (CEA equilibrium / frozen modes, `combustion.nozzle_flow`, with an
+> ideal-Isp band and kinetic-freezing warning); CEA running on cryogenic
+> default propellant states regardless of the configured delivery temperatures
+> (`combustion.use_delivery_temperatures`, regen-outlet coupling); the Bartz
+> throat radius of curvature applied to the diameter instead of the radius;
+> Bartz transport properties from an Eucken/default fallback instead of CEA
+> (synced, with a frozen/equilibrium basis and a ± band); the ideal instead of
+> the effective c* in the Bartz mass flux; silent wall-solve fallbacks; and a
+> `cooling` block printed as if it were the solver input. Added: loss
+> estimate (throat Re, boundary layer, divergence), Taylor GH2 and laminar
+> rectangular-duct correlations, coolant Mach, feed-pressure budget, material
+> database with wall limits and a first-order stress/strain check, and a
+> radiation-cooled skirt model. See `docs/CONFIGURATION.md` for the fields.
+> Existing regen results shift slightly (effective c*, curvature, CEA Pr);
+> re-anchor `bartz_correction` where it was calibrated against test data.
+
 > **Status:** the recommended priorities in §7 have been implemented, plus a
 > deploy-prep pass for internal Studio use: campaign-path confinement and
 > isolated campaign artifact dirs, save concurrency (`file_sha256` / 409),

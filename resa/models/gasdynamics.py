@@ -40,3 +40,28 @@ def pressure_ratio_from_mach(M: float, g: float) -> float:
     """p/pc (static over stagnation)."""
     return (1.0 + 0.5 * (g - 1.0) * M * M) ** (-g / (g - 1.0))
 
+
+def temperature_ratio_from_mach(M: float, g: float) -> float:
+    """T/Tc (static over stagnation)."""
+    return 1.0 / (1.0 + 0.5 * (g - 1.0) * M * M)
+
+
+def cf_momentum(pe_over_pc: float, g: float) -> float:
+    """Momentum part of the thrust coefficient (Sutton 3-30, first term)."""
+    term = (2.0 * g * g / (g - 1.0)) * (2.0 / (g + 1.0)) ** ((g + 1.0) / (g - 1.0))
+    return float(np.sqrt(term * (1.0 - pe_over_pc ** ((g - 1.0) / g))))
+
+
+def cf_vacuum_single_gamma(eps: float, g: float) -> tuple[float, float, float]:
+    """Single-gamma vacuum thrust coefficient for a given area ratio.
+
+    Returns (cf_vac, pe_over_pc, exit_mach).
+    """
+    Me = mach_from_area_ratio(eps, g, supersonic=True)
+    pr = pressure_ratio_from_mach(Me, g)
+    return cf_momentum(pr, g) + pr * eps, pr, Me
+
+
+def critical_pressure_ratio(g: float) -> float:
+    """p*/pc at the throat (choking)."""
+    return (2.0 / (g + 1.0)) ** (g / (g - 1.0))

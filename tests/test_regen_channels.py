@@ -110,7 +110,7 @@ def test_mesh_watertight_and_width():
 
 def test_solver_smoke_energy_closure():
     cfg, lay = make({"geometry.n_stations": 60, "solver": {
-        "enabled": True, "coolant": "NitrousOxide",
+        "enabled": True, "coolant": "NitrousOxide", "coolant_side": "oxidizer",
         "inlet": {"pressure_bar": 60.0, "temperature_K": 278.0,
                   "location": "nozzle_end"}}})
     from resa.regen_channels.solver import RegenSolver
@@ -133,7 +133,7 @@ def test_standalone_mdot_honors_coolant_side():
     from resa.regen_channels.solver import RegenSolver
 
     base = {"solver": {
-        "enabled": True, "coolant": "NitrousOxide",
+        "enabled": True, "coolant": "NitrousOxide", "coolant_side": "oxidizer",
         "mdot_from_engine": True, "of_ratio": 4.0,
         "inlet": {"pressure_bar": 60.0, "temperature_K": 278.0,
                   "location": "nozzle_end"}}}
@@ -152,7 +152,7 @@ def test_standalone_mdot_honors_coolant_side():
 def test_figure_coolant_path_smoke():
     from resa.regen_channels.viz import figure_coolant_path
     cfg, lay = make({"geometry.n_stations": 40, "solver": {
-        "enabled": True, "coolant": "NitrousOxide",
+        "enabled": True, "coolant": "NitrousOxide", "coolant_side": "oxidizer",
         "inlet": {"pressure_bar": 60.0, "temperature_K": 278.0,
                   "location": "nozzle_end"}}})
     from resa.regen_channels.solver import RegenSolver

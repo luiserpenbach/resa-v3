@@ -39,6 +39,7 @@ class CoolantState:
     quality: float          # -1 single phase, 0..1 two-phase
     T_sat: float            # NaN above critical pressure
     is_supercritical_p: bool
+    a: float = float("nan") # speed of sound [m/s] (NaN in two-phase)
 
 
 class Coolant:
@@ -85,12 +86,17 @@ class Coolant:
             mu = 1.0 / (q / muv + (1 - q) / mul)       # McAdams
             k = (1 - q) * kl + q * kv
             cp = (1 - q) * cpl + q * cpv
+            a = float("nan")
         else:
             cp = fp.prop("C", T, p, self.cp_name)
             mu, k = self.transport(T, rho)
+            try:
+                a = fp.prop("A", T, p, self.cp_name)
+            except Exception:
+                a = float("nan")
         return CoolantState(T=T, p=p, h=h, rho=rho, cp=cp, mu=mu, k=k,
                             Pr=cp * mu / k, quality=q, T_sat=T_sat,
-                            is_supercritical_p=sc_p)
+                            is_supercritical_p=sc_p, a=a)
 
     def h_pt(self, p: float, T: float) -> float:
         return PropsSI("H", "P", p, "T", T, self.cp_name)

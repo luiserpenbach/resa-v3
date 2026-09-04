@@ -113,7 +113,7 @@ def _build_layout(cfg: EngineConfig, result) -> ChannelLayout:
     regen = cfg.regen if cfg.regen is not None else _synth_regen(cfg)
     regen = prepare_regen_config(
         regen, result.thrust_chamber, result.combustion, cfg.chamber,
-        film=cfg.film_cooling)
+        film=cfg.film_cooling, propellants=cfg.propellants)
     contour = contour_from_resa(result.contour)
     return ChannelLayout(contour, regen)
 
@@ -278,7 +278,7 @@ def preview_regen_thermal(
         raise ValueError("Config has no regen block")
     regen = prepare_regen_config(
         cfg.regen, result.thrust_chamber, result.combustion, cfg.chamber,
-        film=cfg.film_cooling,
+        film=cfg.film_cooling, propellants=cfg.propellants,
     )
     if not regen.solver.enabled:
         return {
@@ -308,7 +308,7 @@ def preview_regen_thermal(
     attrs = results.attrs
     if attrs.get("saturation_reached"):
         warnings.append("Bulk coolant reached saturation in part of the circuit")
-    wall_limit = float(regen.solver.wall.max_wall_temp_K)
+    wall_limit = float(attrs["wall_limit_K"])
     t_max = float(results.T_wall_hot_K.max())
     i_hot = int(results.T_wall_hot_K.idxmax())
     min_margin = wall_limit - t_max
