@@ -1,6 +1,32 @@
 const DEFAULT_CONFIG = "configs/projects/ex15/design.yaml";
 const EXPANDED_PROJECTS_KEY = "resa-studio-expanded-projects";
 const THEME_KEY = "resa-studio-theme";
+const SIDEBAR_KEY = "resa-studio-sidebar";
+const RAIL_KEY = "resa-studio-rail";
+
+/** Inline stroke icons (24-unit viewBox), rendered through icon(). */
+const ICONS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+  moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+  play: '<polygon points="6 4 20 12 6 20 6 4"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+  fileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  layers: '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  chart: '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+};
+
+/** SVG markup for an inline icon; extra classes are appended to "icon". */
+function icon(name, cls = "") {
+  const body = ICONS[name] || "";
+  return `<svg class="icon${cls ? " " + cls : ""}" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
+}
 
 const KPI_FIELDS = [
   ["thrust_N", "Thrust", "N", "thrust_src"],
@@ -60,6 +86,12 @@ const els = {
   btnSave: document.getElementById("btn-save"),
   btnCancel: document.getElementById("btn-cancel"),
   btnTheme: document.getElementById("btn-theme"),
+  btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
+  btnToggleRail: document.getElementById("btn-toggle-rail"),
+  sidebarFilter: document.getElementById("sidebar-filter"),
+  configNavEmpty: document.getElementById("config-nav-empty"),
+  pinnedBlock: document.getElementById("pinned-block"),
+  recentBlock: document.getElementById("recent-block"),
   autoRun: document.getElementById("auto-run"),
   health: document.getElementById("health"),
   status: document.getElementById("status"),
@@ -118,8 +150,9 @@ function applyTheme(theme) {
   localStorage.setItem(THEME_KEY, theme);
   if (els.btnTheme) {
     const next = theme === "dark" ? "light" : "dark";
-    els.btnTheme.textContent = next === "light" ? "Light" : "Dark";
+    els.btnTheme.innerHTML = icon(next === "light" ? "sun" : "moon");
     els.btnTheme.setAttribute("aria-label", `Switch to ${next} mode`);
+    els.btnTheme.title = `Switch to ${next} mode`;
   }
 }
 
@@ -256,6 +289,25 @@ function configLabel(path) {
   return parts[parts.length - 1];
 }
 
+/** Render the active config path as breadcrumb segments (full path in the tooltip). */
+function setActivePath(path) {
+  const el = els.activeConfigPath;
+  if (!el) return;
+  if (!path) {
+    el.innerHTML = '<span class="crumb-placeholder">No config selected</span>';
+    el.title = "";
+    return;
+  }
+  const parts = String(path).split("/").filter(Boolean);
+  // The project tree prefix is implied by the sidebar; keep the crumbs short.
+  if (parts[0] === "configs" && parts[1] === "projects") parts.splice(0, 2);
+  const crumbs = parts
+    .map((seg, i) => `<span class="crumb${i === parts.length - 1 ? " crumb-last" : ""}">${esc(seg)}</span>`)
+    .join('<span class="crumb-sep">/</span>');
+  el.innerHTML = icon("file", "icon-sm") + crumbs;
+  el.title = path;
+}
+
 function selectConfig(path) {
   if (!confirmLeaveIfDirty()) return;
   state.loadSeq += 1;
@@ -268,7 +320,7 @@ function selectConfig(path) {
   if (window.StudioP2) StudioP2.touchRecent(path);
   highlightActiveRun();
   els.configPath.value = path;
-  if (els.activeConfigPath) els.activeConfigPath.textContent = path;
+  setActivePath(path);
   highlightConfigNav();
   renderSessionNavs();
   loadEditorConfig();
@@ -437,7 +489,7 @@ async function saveEdit() {
     }
     const resolved = await api(`/api/config/resolve?config_path=${encodeURIComponent(res.config_path)}`);
     applyEditorPayload(resolved);
-    if (els.activeConfigPath) els.activeConfigPath.textContent = res.config_path;
+    setActivePath(res.config_path);
     await validateEditorConfig(state.editor.getConfig(), { silent: true });
     clearResults();
   } catch (err) {
@@ -640,7 +692,9 @@ function renderArtifacts(engine, configHash, artifacts) {
     link.href = artifactUrl(engine, configHash, file);
     const isPdf = file.endsWith(".pdf");
     link.className = `artifact-link${isPlotArtifact(file) ? " plot" : " download"}${isPdf ? " pdf" : ""}`;
-    link.textContent = isPdf ? `📄 ${file}` : file;
+    const iconName = isPlotArtifact(file) ? "chart" : isPdf ? "fileText" : "download";
+    link.innerHTML = `${icon(iconName, "icon-sm")}<span class="artifact-name">${esc(file)}</span>`;
+    link.title = file;
     if (isPlotArtifact(file)) {
       link.addEventListener("click", (e) => {
         e.preventDefault();
@@ -762,7 +816,7 @@ function updatePinButton() {
   if (!saved) return;
   const pinned = isBaselineRun(data);
   btn.classList.toggle("is-pinned", pinned);
-  btn.textContent = pinned ? "📌 baseline" : "📌 pin";
+  btn.innerHTML = icon("pin", "icon-sm") + (pinned ? "Baseline" : "Pin baseline");
   btn.title = pinned
     ? "This run is the baseline — click to unpin"
     : "Pin this run as the comparison baseline";
@@ -881,7 +935,7 @@ function buildRunRow(run) {
   const editBtn = document.createElement("button");
   editBtn.type = "button";
   editBtn.className = "btn-row-act";
-  editBtn.textContent = "✎";
+  editBtn.innerHTML = icon("pencil");
   editBtn.title = "Edit label";
   editBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -890,7 +944,7 @@ function buildRunRow(run) {
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
   pinBtn.className = "btn-row-act btn-row-pin" + (run.is_baseline ? " is-pinned" : "");
-  pinBtn.textContent = "📌";
+  pinBtn.innerHTML = icon("pin");
   pinBtn.title = run.is_baseline ? "Unpin baseline" : "Pin as baseline";
   pinBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1201,14 +1255,16 @@ async function loadCampaigns() {
       const row = document.createElement("div");
       row.className = "campaign-row";
       row.innerHTML = `
-        <div class="campaign-name">${esc(c.name)}</div>
-        <div class="campaign-meta">${esc(c.n_configs)} configs</div>
+        ${icon("layers", "icon-sm")}
+        <div class="campaign-name" title="${esc(c.path)}">${esc(c.name)}</div>
+        <div class="campaign-meta">${esc(c.n_configs)} cfg</div>
       `;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn-campaign-run";
-      btn.textContent = "Run";
-      btn.title = c.path;
+      btn.innerHTML = icon("play", "icon-sm");
+      btn.title = `Run campaign ${c.path}`;
+      btn.setAttribute("aria-label", `Run campaign ${c.name}`);
       btn.addEventListener("click", () => runCampaign(c.path));
       row.appendChild(btn);
       els.campaignsList.appendChild(row);
@@ -1237,26 +1293,27 @@ async function runCampaign(path) {
 
 function renderSessionNavs() {
   if (!window.StudioP2) return;
-  const renderList = (el, paths, emptyMsg) => {
+  const renderList = (el, block, paths, iconName) => {
     if (!el) return;
     const valid = paths.filter((p) => state.configs.some((c) => c.path === p));
-    if (!valid.length) {
-      el.innerHTML = `<p class="placeholder">${emptyMsg}</p>`;
-      return;
-    }
+    // An empty Pinned / Recent list carries no information — hide the block.
+    if (block) block.classList.toggle("hidden", !valid.length);
     el.innerHTML = "";
     for (const path of valid) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "nav-item";
-      btn.textContent = configLabel(path);
+      btn.className = "nav-item" + (path === state.activeConfig ? " active" : "");
+      const project = projectSlugFromPath(path);
+      btn.innerHTML =
+        `${icon(iconName, "icon-sm")}<span class="nav-item-label">${esc(configLabel(path))}</span>` +
+        (project ? `<span class="nav-item-meta">${esc(project)}</span>` : "");
       btn.title = path;
       btn.addEventListener("click", () => selectConfig(path));
       el.appendChild(btn);
     }
   };
-  renderList(els.pinnedNav, StudioP2.loadList(StudioP2.PINNED_KEY), "Pin configs from the list below.");
-  renderList(els.recentNav, StudioP2.loadList(StudioP2.RECENT_KEY), "—");
+  renderList(els.pinnedNav, els.pinnedBlock, StudioP2.loadList(StudioP2.PINNED_KEY), "star");
+  renderList(els.recentNav, els.recentBlock, StudioP2.loadList(StudioP2.RECENT_KEY), "clock");
 }
 
 async function openRun(engine, configHash) {
@@ -1269,9 +1326,8 @@ async function openRun(engine, configHash) {
     if (data.config && state.editor) {
       state.activeConfig = null;
       highlightConfigNav();
-      if (els.activeConfigPath) {
-        els.activeConfigPath.textContent = data.config_source || `${data.outdir}/config_resolved.yaml`;
-      }
+      renderSessionNavs();
+      setActivePath(data.config_source || `${data.outdir}/config_resolved.yaml`);
       applyEditorPayload(
         {
           config_path: data.config_source || `${data.outdir}/config_resolved.yaml`,
@@ -1314,18 +1370,20 @@ function renderProjectNav(projects) {
 
     const summary = document.createElement("summary");
     summary.className = "nav-project-header";
+    block.dataset.projectName = project.name;
     summary.innerHTML = `
       <span class="nav-chevron" aria-hidden="true"></span>
+      ${icon("folder", "icon-sm nav-project-icon")}
       <span class="nav-project-label">
         <span class="nav-project-name">${esc(project.name)}</span>
-        <span class="nav-project-meta">${project.configs.length} cfg</span>
+        <span class="nav-project-meta" title="${project.configs.length} configs">${project.configs.length}</span>
       </span>
     `;
 
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "btn-icon btn-add-config";
-    addBtn.textContent = "+";
+    addBtn.innerHTML = icon("plus", "icon-sm");
     addBtn.title = "New config in this project";
     addBtn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1335,12 +1393,8 @@ function renderProjectNav(projects) {
     summary.appendChild(addBtn);
     block.appendChild(summary);
 
-    if (project.description) {
-      const desc = document.createElement("p");
-      desc.className = "nav-project-desc form-hint";
-      desc.textContent = project.description;
-      block.appendChild(desc);
-    }
+    // Descriptions live in the tooltip so the tree stays one line per project.
+    if (project.description) summary.title = project.description;
 
     const list = document.createElement("div");
     list.className = "nav-project-configs";
@@ -1352,15 +1406,15 @@ function renderProjectNav(projects) {
       btn.className = "nav-item";
       btn.dataset.config = item.path;
       const label = item.filename?.replace(/\.ya?ml$/i, "") || item.name;
-      btn.innerHTML = item.is_primary
-        ? `<span class="cfg-name">${esc(label)}</span><span class="cfg-badge">primary</span>`
-        : `<span class="cfg-name">${esc(label)}</span>`;
+      btn.innerHTML =
+        `${icon("file", "icon-sm")}<span class="cfg-name">${esc(label)}</span>` +
+        (item.is_primary ? '<span class="cfg-badge">primary</span>' : "");
       btn.title = item.path;
       btn.addEventListener("click", () => selectConfig(item.path));
       const pin = document.createElement("button");
       pin.type = "button";
       pin.className = "btn-pin" + (window.StudioP2?.isPinned(item.path) ? " is-pinned" : "");
-      pin.textContent = "★";
+      pin.innerHTML = icon("star", "icon-sm");
       pin.title = "Pin config";
       pin.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1377,6 +1431,8 @@ function renderProjectNav(projects) {
     block.appendChild(list);
 
     block.addEventListener("toggle", () => {
+      // Projects the sidebar filter opened transiently are not persisted.
+      if (block.dataset.autoOpened) return;
       if (block.open) expanded.add(project.slug);
       else expanded.delete(project.slug);
       localStorage.setItem(EXPANDED_PROJECTS_KEY, JSON.stringify([...expanded]));
@@ -1387,6 +1443,7 @@ function renderProjectNav(projects) {
 
   renderSessionNavs();
   highlightConfigNav();
+  applySidebarFilter();
 
   els.configPath.innerHTML = "";
   for (const item of state.configs) {
@@ -1394,6 +1451,92 @@ function renderProjectNav(projects) {
     opt.value = item.path;
     opt.textContent = item.path;
     els.configPath.appendChild(opt);
+  }
+}
+
+/* ── Sidebar filter, panel toggles, shortcuts ─────────────── */
+
+/** Show only configs whose path or project name matches the sidebar filter. */
+function applySidebarFilter() {
+  if (!els.configNav) return;
+  const q = (els.sidebarFilter?.value || "").trim().toLowerCase();
+  let anyVisible = false;
+  for (const block of els.configNav.querySelectorAll(".nav-project")) {
+    const projectHay = `${block.dataset.projectName || ""} ${block.dataset.project || ""}`.toLowerCase();
+    const projectMatch = !!q && projectHay.includes(q);
+    let hit = false;
+    for (const row of block.querySelectorAll(".nav-item-row")) {
+      const btn = row.querySelector(".nav-item");
+      const hay = `${btn?.dataset.config || ""} ${btn?.textContent || ""}`.toLowerCase();
+      const match = !q || projectMatch || hay.includes(q);
+      row.classList.toggle("is-filtered-out", !match);
+      if (match) hit = true;
+    }
+    block.classList.toggle("is-filtered-out", !!q && !hit);
+    if (q && hit && !block.open) {
+      block.dataset.autoOpened = "1";
+      block.open = true;
+    } else if (!q && block.dataset.autoOpened) {
+      delete block.dataset.autoOpened;
+      if (!block.querySelector(".nav-item.active")) block.open = false;
+    }
+    if (!q || hit) anyVisible = true;
+  }
+  els.configNavEmpty?.classList.toggle("hidden", !q || anyVisible);
+}
+
+function setPanelCollapsed(cls, key, collapsed) {
+  document.documentElement.classList.toggle(cls, collapsed);
+  try {
+    localStorage.setItem(key, collapsed ? "collapsed" : "open");
+  } catch {
+    /* storage unavailable — the toggle still works for this session */
+  }
+}
+
+function toggleSidebar(collapsed) {
+  const root = document.documentElement;
+  const next = collapsed === undefined ? !root.classList.contains("sidebar-collapsed") : !!collapsed;
+  setPanelCollapsed("sidebar-collapsed", SIDEBAR_KEY, next);
+}
+
+function toggleRail(collapsed) {
+  const root = document.documentElement;
+  const next = collapsed === undefined ? !root.classList.contains("rail-collapsed") : !!collapsed;
+  setPanelCollapsed("rail-collapsed", RAIL_KEY, next);
+}
+
+/**
+ * Global shortcuts: Ctrl/Cmd+B toggles the sidebar, Ctrl/Cmd+K focuses the
+ * config filter, Ctrl/Cmd+Enter runs fast, Ctrl/Cmd+S saves while editing.
+ */
+function handleGlobalKeydown(e) {
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod) {
+    if (e.key === "Escape" && e.target === els.sidebarFilter && els.sidebarFilter.value) {
+      els.sidebarFilter.value = "";
+      applySidebarFilter();
+    }
+    return;
+  }
+  if (e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  if (key === "b") {
+    e.preventDefault();
+    toggleSidebar();
+  } else if (key === "k") {
+    e.preventDefault();
+    toggleSidebar(false);
+    els.sidebarFilter?.focus();
+    els.sidebarFilter?.select();
+  } else if (e.key === "Enter") {
+    if (els.btnRunFast && !els.btnRunFast.disabled) {
+      e.preventDefault();
+      run("fast");
+    }
+  } else if (key === "s") {
+    e.preventDefault();
+    if (state.editSession?.editing && state.editSession.dirty) saveEdit();
   }
 }
 
@@ -1479,7 +1622,7 @@ async function loadEditorConfig() {
     }
     if (loadId !== state.loadSeq) return;
     state.activeConfig = path;
-    if (els.activeConfigPath) els.activeConfigPath.textContent = path;
+    setActivePath(path);
     highlightConfigNav();
     applyEditorPayload(data);
     await validateEditorConfig(state.editor.getConfig(), { silent: true });
@@ -1656,6 +1799,10 @@ els.btnEdit?.addEventListener("click", enterEditMode);
 els.btnSave?.addEventListener("click", saveEdit);
 els.btnCancel?.addEventListener("click", cancelEdit);
 els.btnTheme?.addEventListener("click", toggleTheme);
+els.btnToggleSidebar?.addEventListener("click", () => toggleSidebar());
+els.btnToggleRail?.addEventListener("click", () => toggleRail());
+els.sidebarFilter?.addEventListener("input", applySidebarFilter);
+document.addEventListener("keydown", handleGlobalKeydown);
 
 (async function init() {
   try {
@@ -1674,7 +1821,7 @@ els.btnTheme?.addEventListener("click", toggleTheme);
     await Promise.all([loadConfigs(), loadRuns(), loadCampaigns()]);
   } catch (err) {
     els.health.textContent = "API offline";
-    els.health.style.color = "var(--danger)";
+    els.health.classList.add("error");
     setStatus(String(err.message), true);
   }
 })();
