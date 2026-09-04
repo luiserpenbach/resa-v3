@@ -156,16 +156,21 @@ def _regen_kpis(cfg: EngineConfig, res) -> dict[str, Any]:
 
     regen = prepare_regen_config(
         cfg.regen, res.thrust_chamber, res.combustion, cfg.chamber,
-        film=cfg.film_cooling)
+        film=cfg.film_cooling, propellants=cfg.propellants)
     if not regen.solver.enabled:
         return {}
     lay = ChannelLayout(_build_contour(regen, res.contour), regen)
     df = RegenSolver(lay, regen).solve()
-    return {
+    out = {
         "T_wall_max_K": round(float(df.T_wall_hot_K.max()), 1),
+        "wall_margin_K": round(float(df.attrs["wall_limit_K"] - df.T_wall_hot_K.max()), 1),
         "dp_regen_bar": round(float(df.dp_cell_bar.sum()), 3),
         "Q_total_kW": round(float(df.attrs["Q_total_kW"]), 2),
+        "outlet_T_K": round(float(df.attrs["outlet_T_K"]), 1),
     }
+    if df.attrs.get("stress_checked"):
+        out["stress_ratio_max"] = round(float(df.attrs["stress_ratio_max"]), 3)
+    return out
 
 
 def _run_sweep(spec: CampaignSpec, out_root: Path, verbose: bool) -> list[dict]:
@@ -206,7 +211,7 @@ def _write_sweep_plots(spec: CampaignSpec, rows: list[dict], out_root: Path) -> 
     ok_rows = [r for r in rows if "error" not in r]
     if not ok_rows or len(axes) > 2:
         return None
-    metrics = [m for m in ("isp_s", "thrust_N", "T_wall_max_K", "dp_regen_bar")
+    metrics = [m for m in ("isp_s", "thrust_N", "T_wall_max_K", "wall_margin_K", "dp_regen_bar")
                if any(r.get(m) is not None for r in ok_rows)]
     if not metrics:
         return None
@@ -263,9 +268,11 @@ def _regen_diff_html(cfg_a_path: str, cfg_b_path: str, res_a, res_b, path: Path)
             f"regen diff skipped — no regen block in: {', '.join(missing)}"
         )
     regen_a = prepare_regen_config(
-        cfg_a.regen, res_a.thrust_chamber, res_a.combustion, cfg_a.chamber)
+        cfg_a.regen, res_a.thrust_chamber, res_a.combustion, cfg_a.chamber,
+        propellants=cfg_a.propellants)
     regen_b = prepare_regen_config(
-        cfg_b.regen, res_b.thrust_chamber, res_b.combustion, cfg_b.chamber)
+        cfg_b.regen, res_b.thrust_chamber, res_b.combustion, cfg_b.chamber,
+        propellants=cfg_b.propellants)
     lay_a = ChannelLayout(contour_from_resa(res_a.contour), regen_a)
     lay_b = ChannelLayout(contour_from_resa(res_b.contour), regen_b)
     path.parent.mkdir(parents=True, exist_ok=True)

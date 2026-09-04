@@ -13,7 +13,8 @@ def main():
     cfg = load_config("configs/projects/e2_c1/design_regen.yaml")
     res = run(cfg)
     regen = prepare_regen_config(
-        cfg.regen, res.thrust_chamber, res.combustion, cfg.chamber)
+        cfg.regen, res.thrust_chamber, res.combustion, cfg.chamber,
+        propellants=cfg.propellants)
     lay = ChannelLayout(contour_from_resa(res.contour), regen)
     sol = RegenSolver(lay, regen)
     cool = Coolant(regen.solver.coolant)

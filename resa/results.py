@@ -6,6 +6,7 @@ how they were determined:
     "calculated"                 derived from other quantities
     "optimized: max Isp"         optimum found by the tool (O/F)
     "optimized: pe = p_amb"      optimum expansion chosen by the tool (eps)
+    "estimated: ..."             first-order model estimate (e.g. eta_cf)
 Reports surface this next to every number, so a table always shows what was an
 assumption vs a result.
 """
@@ -24,10 +25,37 @@ if TYPE_CHECKING:
 class CombustionResult:
     cstar_ideal_m_s: float
     tc_K: float
-    gamma: float
+    gamma: float                     # chamber isentropic exponent (equilibrium for CEA)
     mw_kg_kmol: float
     R_specific: float
     source: str                      # 'table' | 'rocketcea'
+    # chamber transport properties (None when the backend cannot supply them)
+    cp_frozen_J_kgK: Optional[float] = None
+    mu_Pa_s: Optional[float] = None
+    k_frozen_W_mK: Optional[float] = None
+    pr_frozen: Optional[float] = None
+    cp_eq_J_kgK: Optional[float] = None
+    k_eq_W_mK: Optional[float] = None
+    pr_eq: Optional[float] = None
+    mu_throat_Pa_s: Optional[float] = None
+    # propellant reference states actually used by the combustion backend
+    ox_state: str = ""               # e.g. 'O2(L) at 90.2 K (CEA default)'
+    fuel_state: str = ""
+    nozzle_flow: str = "single_gamma"
+
+    @property
+    def has_transport(self) -> bool:
+        return self.mu_Pa_s is not None and self.pr_frozen is not None
+
+
+@dataclass(frozen=True)
+class NozzleState:
+    """Ideal nozzle expansion state for one (O/F, pc, eps)."""
+    cf_vac: float                    # ideal vacuum thrust coefficient
+    pe_over_pc: float
+    exit_mach: float
+    gamma_exit: float
+    source: str                      # 'single_gamma' | 'cea_equilibrium' | 'cea_frozen' | ...
 
 
 @dataclass(frozen=True)
@@ -53,7 +81,56 @@ class ThrustChamberResult:
     separated: bool                  # Summerfield pe < 0.4 p_amb
     eta_cf: float = 1.0              # nozzle (CF) efficiency applied
     pc_converged: bool = True        # analyze-mode Pc fixed-point convergence
+    cf_source: str = "single_gamma"  # how the ideal CF was obtained
+    isp_vac_ideal_s: Optional[float] = None   # ideal vacuum Isp (no efficiencies)
+    gamma_exit: Optional[float] = None
     provenance: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class NozzleReference:
+    """Ideal vacuum Isp of the nominal point under every nozzle-flow model the
+    backend can evaluate (rocketcea only). Shows the equilibrium/frozen band
+    around whichever model the config selected."""
+    selected: str
+    eps: float
+    isp_vac_single_gamma_s: float
+    isp_vac_equilibrium_s: Optional[float] = None
+    isp_vac_frozen_s: Optional[float] = None
+    isp_vac_frozen_at_throat_s: Optional[float] = None
+
+    def spread_fraction(self) -> Optional[float]:
+        """(equilibrium - frozen) / equilibrium, or None."""
+        if self.isp_vac_equilibrium_s is None or self.isp_vac_frozen_s is None:
+            return None
+        return (self.isp_vac_equilibrium_s - self.isp_vac_frozen_s) / self.isp_vac_equilibrium_s
+
+
+@dataclass(frozen=True)
+class NozzleLossEstimate:
+    """First-order nozzle loss estimate (see models/losses.py)."""
+    re_throat: float
+    mu_throat_Pa_s: float
+    bl_loss_fraction: float          # wall-shear thrust loss / ideal vacuum thrust
+    laminar_fraction: float          # fraction of wetted length with laminar BL
+    divergence_efficiency: float     # lambda
+    eta_cf_estimate: float           # lambda * (1 - bl_loss_fraction)
+    eta_cf_used: float
+    method: str
+
+
+@dataclass(frozen=True)
+class CouplingResult:
+    """Outcome of the iterative loops in the pipeline (regen outlet -> propellant
+    temperature, estimated eta_cf -> sizing)."""
+    iterations: int
+    converged: bool
+    fuel_temp_K: float
+    ox_temp_K: float
+    regen_outlet_T_K: Optional[float] = None
+    coupled_side: Optional[str] = None
+    eta_cf: Optional[float] = None
+    history: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -77,7 +154,8 @@ class ContourResult:
 
     def __post_init__(self):
         n = len(self.x_m)
-        assert len(self.r_m) == n == len(self.area_m2) == len(self.mach)
+        if not (len(self.r_m) == n == len(self.area_m2) == len(self.mach)):
+            raise ValueError("contour arrays must have equal length")
 
     @property
     def total_length_m(self) -> float:
@@ -180,6 +258,9 @@ class EngineResult:
     uncertainty: Optional[UncertaintyResult] = None
     regen: Optional["RegenResult"] = None
     film: Optional[FilmCoolingResult] = None
+    nozzle_reference: Optional[NozzleReference] = None
+    losses: Optional[NozzleLossEstimate] = None
+    coupling: Optional[CouplingResult] = None
     warnings: tuple = ()
 
     def summary(self) -> dict:
@@ -201,11 +282,25 @@ class EngineResult:
             "mdot_kg_s": round(tc.mdot_total_kg_s, 4),
             "isp_s": round(tc.isp_s, 2),
             "cf": round(tc.cf, 4),
+            "cf_src": tc.cf_source,
+            "eta_cf": round(tc.eta_cf, 4),
             "throat_r_mm": round(tc.throat_radius_m * 1e3, 3),
             "tc_K": round(self.combustion.tc_K, 1),
             "separated": tc.separated,
             "n_warnings": len(self.warnings),
         }
+        if self.nozzle_reference is not None:
+            r = self.nozzle_reference
+            if r.isp_vac_equilibrium_s is not None:
+                d["isp_vac_eq_ideal_s"] = round(r.isp_vac_equilibrium_s, 2)
+            if r.isp_vac_frozen_s is not None:
+                d["isp_vac_frozen_ideal_s"] = round(r.isp_vac_frozen_s, 2)
+        if self.losses is not None:
+            d["re_throat"] = round(self.losses.re_throat, 0)
+            d["eta_cf_est"] = round(self.losses.eta_cf_estimate, 4)
+        if self.coupling is not None:
+            d["fuel_temp_K"] = round(self.coupling.fuel_temp_K, 1)
+            d["ox_temp_K"] = round(self.coupling.ox_temp_K, 1)
         if self.uncertainty is not None:
             u = self.uncertainty
             d["eta_tol"] = u.eta_tol

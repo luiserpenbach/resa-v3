@@ -12,6 +12,13 @@ Three public functions, one set of physics:
 Off-design sweeps (models/offdesign.py) map evaluate_point over ranges, so
 reverse analysis and throttling are guaranteed to use identical physics.
 
+The ideal nozzle expansion (vacuum CF, pe/pc, exit Mach) comes from the
+combustion model's ``nozzle()``: single-gamma isentropic relations for tables
+and, for rocketcea, optionally CEA shifting-equilibrium or frozen expansion
+(``combustion.nozzle_flow``). Ambient thrust is then
+
+    CF = (CF_vac - p_amb * eps / pc) * eta_cf        (Sutton 3-30 rearranged)
+
 Refs: Sutton, *Rocket Propulsion Elements*, 9th ed., ch. 3.
 """
 from __future__ import annotations
@@ -20,24 +27,17 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 
 from ..config.schema import AnalyzePoint, GeometryConfig, OperatingPoint
-from ..results import ThrustChamberResult
-from .gasdynamics import (
-    area_ratio_from_mach,
-    mach_from_area_ratio,
-    mach_from_pressure_ratio,
-    pressure_ratio_from_mach,
-)
+from ..results import NozzleState, ThrustChamberResult
 
 _G0 = 9.80665
 _BAR = 1.0e5
 _SEP_LIMIT = 0.4          # Summerfield: separation risk if pe < ~0.4 p_amb
 
 
-def _cf(pc: float, pe: float, pa: float, eps: float, g: float) -> float:
-    """Thrust coefficient incl. ambient term (Sutton 3-30). Pressures in Pa."""
-    term = (2.0 * g * g / (g - 1.0)) * (2.0 / (g + 1.0)) ** ((g + 1.0) / (g - 1.0))
-    cf_mom = np.sqrt(term * (1.0 - (pe / pc) ** ((g - 1.0) / g)))
-    return cf_mom + (pe - pa) / pc * eps
+def _cf(ns: NozzleState, pc: float, pa: float, eps: float, eta_cf: float = 1.0) -> float:
+    """Thrust coefficient incl. ambient term from an ideal nozzle state.
+    Pressures in Pa. eta_cf multiplies the whole CF (documented convention)."""
+    return (ns.cf_vac - pa / pc * eps) * eta_cf
 
 
 # --------------------------------------------------------------------------- #
@@ -80,16 +80,18 @@ def evaluate_point(
     g = comb.gamma
     pc = pc_bar * _BAR
     pa = p_amb_bar * _BAR
-    Me = mach_from_area_ratio(eps, g, supersonic=True)
-    pe = pc * pressure_ratio_from_mach(Me, g)
-    cf = _cf(pc, pe, pa, eps, g) * eta_cf
+    ns = model.nozzle(of, pc_bar, eps)
+    pe = pc * ns.pe_over_pc
+    cf = _cf(ns, pc, pa, eps, eta_cf)
     thrust = cf * pc * at_m2
     isp = thrust / (mdot * _G0)
     separated = bool(pa > 0 and pe < _SEP_LIMIT * pa)
     return dict(
         of=of, mdot=mdot, mdot_ox=mdot_ox, mdot_fuel=mdot_fuel,
         pc_bar=pc_bar, pe_bar=pe / _BAR, thrust_N=thrust, isp_s=isp,
-        cf=cf, cstar_eff_m_s=cstar_eff, exit_mach=Me, gamma=g,
+        cf=cf, cstar_eff_m_s=cstar_eff, exit_mach=ns.exit_mach, gamma=g,
+        gamma_exit=ns.gamma_exit, cf_source=ns.source,
+        isp_vac_ideal_s=ns.cf_vac * comb.cstar_ideal_m_s / _G0,
         separated=separated, pc_converged=pc_converged,
     )
 
@@ -97,36 +99,25 @@ def evaluate_point(
 # --------------------------------------------------------------------------- #
 # DESIGN mode
 # --------------------------------------------------------------------------- #
-def _resolve_eps(op: OperatingPoint, g: float) -> tuple[float, float, float, str]:
-    """-> (eps, Me, pe_Pa, provenance)."""
+def _resolve_eps(op: OperatingPoint, model, of: float
+                 ) -> tuple[float, NozzleState, float, str]:
+    """-> (eps, nozzle state, pe_Pa, provenance)."""
     pc = op.pc_bar * _BAR
     if op.eps is not None:
-        eps, prov = op.eps, "input"
-        Me = mach_from_area_ratio(eps, g, supersonic=True)
-        pe = pc * pressure_ratio_from_mach(Me, g)
-        return eps, Me, pe, prov
+        ns = model.nozzle(of, op.pc_bar, op.eps)
+        return op.eps, ns, pc * ns.pe_over_pc, "input"
     if op.pe_bar is not None:
-        pe, prov = op.pe_bar * _BAR, "calculated (from pe input)"
+        pe_bar, prov = op.pe_bar, "calculated (from pe input)"
     else:  # optimum expansion: pe = p_amb (p_amb > 0 enforced by schema)
-        pe, prov = op.p_amb_bar * _BAR, "optimized: pe = p_amb"
-    # the exit must be supersonic: pe below the critical (choking) pressure
-    p_crit = pc * (2.0 / (g + 1.0)) ** (g / (g - 1.0))
-    if pe >= p_crit:
-        raise ValueError(
-            f"design exit pressure {pe/_BAR:.3f} bar is above the choking "
-            f"limit {p_crit/_BAR:.3f} bar (gamma={g:.3f}) — the nozzle exit "
-            "would be subsonic; lower pe_bar (or give eps directly)"
-        )
-    Me = mach_from_pressure_ratio(pc / pe, g)
-    eps = area_ratio_from_mach(Me, g)
-    return eps, Me, pe, prov
+        pe_bar, prov = op.p_amb_bar, "optimized: pe = p_amb"
+    eps, ns = model.eps_for_pe(of, op.pc_bar, pe_bar)   # raises if subsonic exit
+    return eps, ns, pc * ns.pe_over_pc, prov
 
 
 def _design_isp(of: float, op: OperatingPoint, model) -> float:
     comb = model.at(of, pc_bar=op.pc_bar)
-    g = comb.gamma
-    eps, Me, pe, _ = _resolve_eps(op, g)
-    cf = _cf(op.pc_bar * _BAR, pe, op.p_amb_bar * _BAR, eps, g) * op.eta_cf
+    eps, ns, _, _ = _resolve_eps(op, model, of)
+    cf = _cf(ns, op.pc_bar * _BAR, op.p_amb_bar * _BAR, eps, op.eta_cf)
     return cf * comb.cstar_ideal_m_s * op.eta_cstar / _G0
 
 
@@ -145,12 +136,11 @@ def _resolve_of(op: OperatingPoint, model) -> tuple[float, str]:
 def size(op: OperatingPoint, model) -> ThrustChamberResult:
     of, of_prov = _resolve_of(op, model)
     comb = model.at(of, pc_bar=op.pc_bar)
-    g = comb.gamma
     pc = op.pc_bar * _BAR
     pa = op.p_amb_bar * _BAR
 
-    eps, Me, pe, eps_prov = _resolve_eps(op, g)
-    cf = _cf(pc, pe, pa, eps, g) * op.eta_cf
+    eps, ns, pe, eps_prov = _resolve_eps(op, model, of)
+    cf = _cf(ns, pc, pa, eps, op.eta_cf)
 
     cstar_eff = comb.cstar_ideal_m_s * op.eta_cstar
     at = op.thrust_N / (cf * pc)
@@ -167,12 +157,15 @@ def size(op: OperatingPoint, model) -> ThrustChamberResult:
         throat_area_m2=at, throat_radius_m=np.sqrt(at / np.pi),
         exit_area_m2=ae, exit_radius_m=np.sqrt(ae / np.pi),
         eps=eps, pe_bar=pe / _BAR, cf=cf,
-        isp_s=cf * cstar_eff / _G0, exit_mach=Me,
+        isp_s=cf * cstar_eff / _G0, exit_mach=ns.exit_mach,
         separated=bool(pa > 0 and pe < _SEP_LIMIT * pa),
+        cf_source=ns.source, gamma_exit=ns.gamma_exit,
+        isp_vac_ideal_s=ns.cf_vac * comb.cstar_ideal_m_s / _G0,
         provenance={
             "thrust": "input", "pc": "input",
             "of_ratio": of_prov, "eps": eps_prov,
             "mdot": "calculated", "geometry": "calculated",
+            "cf": ns.source, "eta_cf": "input",
         },
     )
 
@@ -201,9 +194,12 @@ def analyze(geom: GeometryConfig, ap: AnalyzePoint, model) -> ThrustChamberResul
         isp_s=pt["isp_s"], exit_mach=pt["exit_mach"],
         separated=pt["separated"],
         pc_converged=pt["pc_converged"],
+        cf_source=pt["cf_source"], gamma_exit=pt["gamma_exit"],
+        isp_vac_ideal_s=pt["isp_vac_ideal_s"],
         provenance={
             "thrust": "calculated", "pc": "calculated",
             "of_ratio": "calculated (from mdots)", "eps": eps_prov,
             "mdot": "input", "geometry": "input",
+            "cf": pt["cf_source"], "eta_cf": "input",
         },
     )

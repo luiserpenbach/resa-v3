@@ -177,8 +177,12 @@ Reports include warnings for:
 - Flow separation risk (Summerfield criterion)
 - Cooling channel fit at throat circumference
 - Chamber L* feasibility
-- Regen: bulk coolant saturation, wall temperature limit exceeded
+- Regen: bulk coolant saturation, wall temperature limit exceeded, coolant Re < 4000, coolant Mach, feed-pressure shortfall, wall stress ratio, skirt over-temperature, wall-solve fallbacks, fallback hot-gas properties
 - Sweep truncation outside combustion table range
+- Single-gamma C_F vs CEA equilibrium/frozen band, early kinetic freezing at low pc
+- CEA default propellant states that disagree with the configured delivery temperatures
+- Throat Reynolds number below 1e5 and an `eta_cf` above the first-order loss estimate
+- `cooling` block disagreeing with the regen layout the solver uses
 
 ## Status
 
@@ -189,4 +193,10 @@ Reports include warnings for:
 - [x] η_c* uncertainty bands
 - [x] High-fidelity regen channel solver + RESA integration
 - [x] RESA Studio web UI (fast/full runs, previews, compare, campaigns)
+- [x] CEA-native nozzle expansion (`combustion.nozzle_flow`: equilibrium / frozen) with the ideal Isp band and kinetic-freezing warning
+- [x] Delivery-temperature propellant cards (`combustion.use_delivery_temperatures`) and regen-outlet → propellant temperature coupling
+- [x] Bartz with CEA transport properties, throat curvature from the chamber arcs, effective c*, ± band on the correction factor
+- [x] Coolant-side inference and flow guard, Taylor GH2 correlation, laminar rectangular-duct Nu, coolant Mach, feed-pressure budget
+- [x] Material database with wall limits, first-order wall stress / thermal strain, radiation-cooled skirt model
+- [x] Throat Reynolds number and boundary-layer / divergence loss estimate (`eta_cf_source: estimate`)
 - [ ] MoC contour (`chamber.contour: moc`) — planned; use `rao_bell` or `conical` today

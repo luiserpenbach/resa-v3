@@ -71,8 +71,18 @@ def _results_dict(res: EngineResult) -> dict:
         d["offdesign"] = offdesign_to_dict(res.offdesign)
     if res.film is not None:
         d["film"] = {k: _clean(v) for k, v in res.film.summary().items()}
+    if res.nozzle_reference is not None:
+        d["nozzle_reference"] = _scalars(res.nozzle_reference)
+    if res.losses is not None:
+        d["losses"] = _scalars(res.losses)
+    if res.coupling is not None:
+        d["coupling"] = _clean(asdict(res.coupling))
     if res.regen is not None:
         d["regen"] = res.regen.summary()
+        if res.regen.band is not None:
+            d["regen"]["bartz_band"] = _clean(res.regen.band)
+        if res.regen.feed_budget is not None:
+            d["regen"]["feed_budget"] = _clean(res.regen.feed_budget)
     return d
 
 
@@ -109,9 +119,14 @@ def _write_report_md(res: EngineResult, cfg: EngineConfig, cfg_yaml: str,
     _row(L, "c* effective (η={:.2f})".format(tc.eta_cstar),
          f"{tc.cstar_eff_m_s:.1f} m/s", "calculated")
     cf_label = ("C_F" if tc.eta_cf == 1.0
-                else f"C_F effective (η_CF={tc.eta_cf:.2f})")
-    _row(L, cf_label, f"{tc.cf:.4f}", "calculated")
+                else f"C_F effective (η_CF={tc.eta_cf:.3f})")
+    _row(L, cf_label, f"{tc.cf:.4f}", f"calculated ({p.get('cf', tc.cf_source)})")
+    if tc.eta_cf != 1.0 or p.get("eta_cf", "input") != "input":
+        _row(L, "η_CF", f"{tc.eta_cf:.4f}", p.get("eta_cf", "input"))
     _row(L, "Isp", f"{tc.isp_s:.2f} s", "calculated")
+    if tc.isp_vac_ideal_s is not None:
+        _row(L, "Isp vacuum, ideal (no η)", f"{tc.isp_vac_ideal_s:.2f} s",
+             f"calculated ({tc.cf_source})")
     _row(L, "Exit pressure", f"{tc.pe_bar:.3f} bar", "calculated")
     _row(L, "Exit Mach", f"{tc.exit_mach:.3f}", "calculated")
     _row(L, "Throat radius", f"{tc.throat_radius_m*1e3:.2f} mm", p["geometry"])
@@ -126,6 +141,35 @@ def _write_report_md(res: EngineResult, cfg: EngineConfig, cfg_yaml: str,
         _row(L, "Contour method / θn / θe",
              f"{c.method} / {c.theta_n_deg:.1f}° / {c.theta_e_deg:.1f}°",
              "input" if cfg.chamber.theta_n_deg else "calculated")
+
+    comb = res.combustion
+    L.append("\n## Combustion & nozzle model\n")
+    L.append(f"- **Propellant states (CEA)**: ox {comb.ox_state or '—'}; fuel {comb.fuel_state or '—'}")
+    L.append(f"- **Nozzle expansion**: `{comb.nozzle_flow}` (C_F source: `{tc.cf_source}`)")
+    if comb.has_transport:
+        L.append(f"- **Chamber transport (frozen / equilibrium)**: μ = {comb.mu_Pa_s*1e5:.2f}e-5 Pa·s, "
+                 f"cp = {comb.cp_frozen_J_kgK:.0f} / {comb.cp_eq_J_kgK or float('nan'):.0f} J/kg/K, "
+                 f"Pr = {comb.pr_frozen:.3f} / {comb.pr_eq or float('nan'):.3f}")
+    nr = res.nozzle_reference
+    if nr is not None:
+        L.append("- **Ideal vacuum Isp band at ε = {:.1f}** (no efficiencies): single-γ {:.1f} s · "
+                 "CEA equilibrium {:.1f} s · frozen-at-throat {:.1f} s · frozen {:.1f} s "
+                 "(selected: `{}`)".format(
+                     nr.eps, nr.isp_vac_single_gamma_s, nr.isp_vac_equilibrium_s,
+                     nr.isp_vac_frozen_at_throat_s, nr.isp_vac_frozen_s, nr.selected))
+    est = res.losses
+    if est is not None:
+        L.append(f"- **Nozzle losses (first-order)**: throat Re = {est.re_throat:.2e}, wall-shear loss "
+                 f"{est.bl_loss_fraction*100:.2f} % (laminar over {est.laminar_fraction*100:.0f} % of the "
+                 f"wetted length), divergence λ = {est.divergence_efficiency:.4f} → "
+                 f"η_CF estimate {est.eta_cf_estimate:.4f} (used {est.eta_cf_used:.4f})")
+    cp = res.coupling
+    if cp is not None:
+        side = f", {cp.coupled_side} fed from the regen outlet ({cp.regen_outlet_T_K:.1f} K)" if cp.coupled_side else ""
+        L.append(f"- **Coupling loop**: {cp.iterations} iteration(s), "
+                 f"{'converged' if cp.converged else 'NOT converged'}; fuel {cp.fuel_temp_K:.1f} K, "
+                 f"ox {cp.ox_temp_K:.1f} K{side}"
+                 + (f", η_CF {cp.eta_cf:.4f}" if cp.eta_cf is not None else ""))
 
     u = res.uncertainty
     if u is not None:
@@ -195,11 +239,46 @@ def _write_report_md(res: EngineResult, cfg: EngineConfig, cfg_yaml: str,
         L.append("\n## Regen cooling\n")
         if rg.results is not None:
             s = rg.summary()
-            L.append(f"- **Q_total**: {s['Q_total_kW']:.1f} kW")
+            a = rg.results.attrs
+            lay = rg.layout
+            i_t = int(np.argmin(np.abs(lay.x - lay.x_throat)))
+            L.append(f"- **Coolant**: {cfg.regen.solver.coolant} on the **{s['coolant_side'] or '?'}** side, "
+                     f"{s['mdot_coolant_kg_s']*1e3:.2f} g/s, correlation `{a.get('coolant_correlation')}`")
+            L.append(f"- **Layout (solver input)**: {lay.N} channels, throat w × h = "
+                     f"{lay.w[i_t]*1e3:.2f} × {lay.h[i_t]*1e3:.2f} mm, rib {lay.t_rib[i_t]*1e3:.2f} mm, "
+                     f"wall {lay.t_wall[i_t]*1e3:.2f} mm, x = {lay.x[0]*1e3:.1f}..{lay.x[-1]*1e3:.1f} mm")
+            L.append(f"- **Hot gas**: Bartz × {a.get('bartz_correction', float('nan')):g}"
+                     + (f" ± {a.get('bartz_tol'):g}" if a.get('bartz_tol') else "")
+                     + f", {a.get('hot_gas_property_note')}, r_curv = {a.get('hot_gas_r_curv_m', 0)*1e3:.2f} mm")
+            L.append(f"- **Q_total**: {s['Q_total_kW']:.2f} kW")
             L.append(f"- **Δp**: {s['dp_bar']:.2f} bar")
             L.append(f"- **Outlet**: {s['outlet_T_K']:.1f} K / "
                      f"{s['outlet_p_bar']:.1f} bar")
-            L.append(f"- **T_wall,max**: {s['T_wall_max_K']:.0f} K")
+            L.append(f"- **T_wall,max**: {s['T_wall_max_K']:.0f} K vs limit {s['T_wall_limit_K']:.0f} K "
+                     f"({a.get('wall_limit_source')}; {a.get('wall_material')}) → margin {s['wall_margin_K']:.0f} K")
+            if rg.band is not None:
+                L.append(f"- **Bartz band ± {rg.band['tol']:g}**: T_wall,max "
+                         f"{rg.band['lo']['T_wall_max_K']:.0f} K (× {rg.band['lo']['bartz_correction']:.2f}) … "
+                         f"{rg.band['hi']['T_wall_max_K']:.0f} K (× {rg.band['hi']['bartz_correction']:.2f})")
+            if "stress_ratio_max" in s:
+                L.append(f"- **Wall stress (first-order)**: σ_max {s['sigma_max_MPa']:.0f} MPa, "
+                         f"ratio to yield {s['stress_ratio_max']:.2f}, thermal strain "
+                         f"{s['thermal_strain_max']*100:.2f} %")
+            L.append(f"- **Coolant flow**: Re {rg.results.Re.min():.0f}..{rg.results.Re.max():.0f}, "
+                     f"Mach max {s['coolant_mach_max']:.2f}, low-Re stations {s['n_low_re_stations']}")
+            if rg.feed_budget is not None:
+                fb = rg.feed_budget
+                L.append(f"- **Feed budget**: outlet {fb['outlet_p_bar']:.2f} bar vs required "
+                         f"{fb['required_p_bar']:.2f} bar (pc × (1 + {fb['injector_dp_fraction']:g})) → "
+                         f"margin {fb['margin_bar']:.2f} bar")
+            if rg.skirt is not None:
+                sk = rg.skirt.attrs
+                L.append(f"- **Radiation-cooled skirt** (x {sk['x_start_m']*1e3:.1f}..{sk['x_end_m']*1e3:.1f} mm, "
+                         f"ε_emis {sk['emissivity']:g}): T_wall {sk['T_wall_max_K']:.0f} K max, "
+                         f"{sk['T_wall_exit_K']:.0f} K at exit, {sk['Q_radiated_kW']:.2f} kW radiated"
+                         + (f", limit {sk['limit_K']:.0f} K" if sk.get('limit_K') else ""))
+            if s.get("wall_solve_fallbacks"):
+                L.append(f"- ⚠ wall solve fell back at {s['wall_solve_fallbacks']} station(s)")
             if s.get("saturation_reached"):
                 L.append("- ⚠ bulk coolant saturation reached")
         L.append(f"- Artifacts: `{rg.tag}_*.{{csv,html,stl,step}}`")
