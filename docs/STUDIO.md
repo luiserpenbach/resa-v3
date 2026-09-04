@@ -44,6 +44,32 @@ resa_studio/         FastAPI app + adapters
   adapters/          config, run, preview, compare, campaign services
 ```
 
+## Interface
+
+The window is a three-column workspace with a slim title bar:
+
+| Area | Contents |
+|------|----------|
+| Title bar | Sidebar toggle, brand, theme toggle (light / dark), artifacts-panel toggle |
+| Sidebar | Config filter, Pinned and Recent (shown only when non-empty), project tree, campaigns, saved-runs KPI table, collapsible Compare A/B, API status |
+| Document bar | Breadcrumb of the active config, validation chip, Auto-run switch, Validate / Full report / Run fast |
+| Workspace | Results (KPIs, warnings, sweep charts, provenance), Configuration editor, Visualizations |
+| Artifacts rail | Files of the open run; plots open inline, other files download |
+
+The sidebar and the artifacts rail collapse independently and remember their
+state per browser. The theme follows the system preference until you pick one.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl`/`⌘` + `B` | Toggle the sidebar |
+| `Ctrl`/`⌘` + `K` | Focus the config filter (`Esc` clears it) |
+| `Ctrl`/`⌘` + `Enter` | Run fast |
+| `Ctrl`/`⌘` + `S` | Save changes while editing |
+| `Ctrl`/`⌘` + `Z` / `Y` | Undo / redo inside the editor |
+| `↑` / `↓` (+ `Shift`) | Nudge a numeric field by one unit of its last decimal (×10) |
+
 ## Workflow
 
 1. **Select a project** in the sidebar, then pick a config (or create a project / config with **+**).
@@ -54,9 +80,9 @@ resa_studio/         FastAPI app + adapters
 4. **Full report** — writes `out/<engine>_<hash>/` with plots, PDF, CSV, regen
    artifacts when configured.
 5. **Saved runs** — a sortable KPI table (thrust, Isp, T_wall,max, Pc, regen Δp,
-   warnings, age). Give runs a **label** (✎ on the row) and a note; shift+click
-   to pick compare A/B.
-6. **Pin a baseline** (📌) — every other run's KPIs then show **delta chips**
+   warnings, age). Give runs a **label** (pencil icon on the row) and a note;
+   shift+click to pick compare A/B.
+6. **Pin a baseline** (pin icon) — every other run's KPIs then show **delta chips**
    vs the baseline (green = favorable, red = unfavorable), on run detail and
    fast-run results alike.
 7. **Campaigns** — run multi-config batches from `campaigns/*.yaml`, including

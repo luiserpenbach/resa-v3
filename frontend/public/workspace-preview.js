@@ -522,7 +522,8 @@
       this.canvas.width = w;
       this.canvas.height = h;
       gl.viewport(0, 0, w, h);
-      gl.clearColor(0.08, 0.09, 0.11, 1);
+      const bg = cssColorToRgb(canvasColors().plotBg, [0.08, 0.09, 0.11]);
+      gl.clearColor(bg[0], bg[1], bg[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
 
@@ -536,6 +537,17 @@
     _buildMesh(contour) {
       const xs = contour.x_m;
       const rs = contour.r_m;
+      // The shader has no projection matrix, so clip space is [-1, 1] on
+      // every axis. Normalise the metre-scale contour into a unit box so the
+      // mesh lands inside it regardless of engine size.
+      let xMin = Infinity, xMax = -Infinity, rMax = 0;
+      for (let i = 0; i < xs.length; i++) {
+        xMin = Math.min(xMin, xs[i]);
+        xMax = Math.max(xMax, xs[i]);
+        rMax = Math.max(rMax, rs[i]);
+      }
+      const xMid = (xMin + xMax) / 2;
+      const norm = 1 / Math.max((xMax - xMin) / 2, rMax, 1e-9);
       const segs = 48;
       const verts = [];
       const norms = [];
@@ -545,7 +557,7 @@
           const t0 = (j / segs) * Math.PI * 2;
           const t1 = ((j + 1) / segs) * Math.PI * 2;
           const push = (x, r, t) => {
-            verts.push(x, r * Math.cos(t), r * Math.sin(t));
+            verts.push((x - xMid) * norm, r * norm * Math.cos(t), r * norm * Math.sin(t));
             const nr = Math.cos(t);
             const nz = Math.sin(t);
             norms.push(nr, 0, nz);
@@ -560,12 +572,15 @@
     _mvp(aspect) {
       const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
       const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
-      const s = 1.8 * (this.zoom || 1);
+      // Zoom scales x/y only; depth keeps a fixed scale so the unit-box mesh
+      // never leaves the [-1, 1] clip range while zooming.
+      const s = 0.85 * (this.zoom || 1);
+      const sz = 0.5;
       return new Float32Array([
-        cy * s, sx * sy * s, -cx * sy * s, 0,
-        0, cx * s, sx * s, 0,
-        sy * s, -sx * cy * s, cx * cy * s, 0,
-        0, 0, -2.5, 1,
+        cy * s, sx * sy * s, -cx * sy * sz, 0,
+        0, cx * s, sx * sz, 0,
+        sy * s, -sx * cy * s, cx * cy * sz, 0,
+        0, 0, 0, 1,
       ]);
     }
 
@@ -1076,11 +1091,12 @@
       this.canvas.style.width = `${w}px`;
       this.canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#0f1014";
+      const colors = canvasColors();
+      ctx.fillStyle = colors.plotBg;
       ctx.fillRect(0, 0, w, h);
 
       if (!this.normVerts?.length || !this.mesh?.faces?.length) {
-        ctx.fillStyle = "#8b949e";
+        ctx.fillStyle = colors.textMuted;
         ctx.font = "12px system-ui,sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(this.mesh?.vertices ? "Empty mesh" : "Loading channel mesh…", w / 2, h / 2);
@@ -1123,7 +1139,7 @@
         ctx.fill();
       }
 
-      ctx.fillStyle = "#8b949e";
+      ctx.fillStyle = colors.textMuted;
       ctx.font = "10px system-ui,sans-serif";
       ctx.textAlign = "left";
       ctx.fillText("Drag to rotate", 8, h - 8);
@@ -1979,8 +1995,14 @@
         contour.setShowGrid(e.target.checked);
       });
 
-      if (this.contourData) contour.setData(this.contourData);
-      else this._debouncedContour();
+      if (this.contourData) {
+        // Feed both viewers on remount, otherwise the 3D revolve stays empty
+        // until the next contour fetch (e.g. after entering edit mode).
+        contour.setData(this.contourData);
+        revolve.setData(this.contourData);
+      } else {
+        this._debouncedContour();
+      }
       return wrap;
     }
 
