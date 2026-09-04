@@ -1,0 +1,11 @@
+# Spark-50 cooling trade: mixture ratio x chamber pressure on the selected
+# regen layout (GRCop-42, 26 channels, jacket to eps 40). Each point runs the
+# coupled pipeline (regen outlet -> GH2 temperature, estimated eta_cf) and the
+# regen solve; the rollup carries Isp, T_wall_max, wall margin, dp and Q.
+name: spark50_cooling_study
+output: spark50_cooling_study_output
+base: ../../configs/projects/spark-50/spark-50.yaml
+sweep:
+  operating_point.of_ratio: [2.5, 3.0, 3.5, 4.2]
+  operating_point.pc_bar: [5, 6, 7]
+sweep_regen: true

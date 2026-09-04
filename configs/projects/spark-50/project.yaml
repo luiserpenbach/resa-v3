@@ -1,4 +1,4 @@
 name: Spark-50
-description: 50N hydrogen gox thruster for vacuum applications
+description: 50N GOX/GH2 vacuum thruster, 6 bar, O/F 2.5, GRCop-42 regen liner with C-103 radiation skirt
 primary_config: spark-50.yaml
 created: '2026-06-29T11:17:25+00:00'
