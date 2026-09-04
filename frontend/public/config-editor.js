@@ -611,6 +611,14 @@
           el.disabled = false;
           return;
         }
+        // Preview controls (2D/3D toggle, thermal fidelity, exports, sliders,
+        // assembly toggles) only drive the previews, never the config, so
+        // they stay usable in view mode.
+        if (el.closest(".workspace-preview")) {
+          el.disabled = false;
+          el.readOnly = false;
+          return;
+        }
         const tag = el.tagName;
         const type = (el.type || "").toLowerCase();
         if (tag === "SELECT" || type === "checkbox" || type === "radio" || type === "button") {

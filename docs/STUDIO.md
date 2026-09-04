@@ -74,6 +74,8 @@ state per browser. The theme follows the system preference until you pick one.
 
 1. **Select a project** in the sidebar, then pick a config (or create a project / config with **+**).
 2. **Edit** — changes validate on blur; invalid fields are highlighted per tab.
+   Preview controls (2D/3D view, thermal fidelity, STL/STEP export, sliders)
+   work in view mode; only config fields need **Edit**.
    Numeric fields nudge with **↑/↓** (one unit of the last decimal place;
    **Shift** for 10×) and live previews follow.
 3. **Run fast** — in-memory pipeline, KPIs + off-design mini charts (no artifacts).
