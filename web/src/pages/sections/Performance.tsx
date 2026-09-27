@@ -178,7 +178,7 @@ function PerformanceInputs() {
         <div className="grid-2">
           <NumberField path={[pt, "eta_cstar"]} label="Combustion efficiency" sym="ηc*" hint="0.92–0.98 typical" />
           <NumberField path={[pt, "eta_cf"]} label="Nozzle efficiency" sym="ηCF" disabled={config[pt]?.eta_cf_source === "estimate"}
-            hint={config[pt]?.eta_cf_source === "estimate" ? "estimated" : "0.95–0.99 typical"} />
+            hint={config[pt]?.eta_cf_source === "estimate" ? `estimated: ${perf ? fmt(perf.performance.eta_cf, 3) : "…"}` : "0.95–0.99 typical"} />
         </div>
         <Toggle label="Estimate nozzle efficiency from divergence & friction losses" checked={config[pt]?.eta_cf_source === "estimate"}
           onChange={(v) => update([pt, "eta_cf_source"], v ? "estimate" : "input")} />

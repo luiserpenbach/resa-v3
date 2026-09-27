@@ -304,7 +304,7 @@ export function PhChart({ dome, isotherms, path, crit, height = 340 }: {
         </g>
         <text x={xs(path.h[0]) + 8} y={ys(path.p[0]) - 8} className="tick" style={{ fill: "var(--ink-2)" }}>inlet</text>
         <text x={xs(path.h[n - 1]) + 8} y={ys(path.p[n - 1]) + 14} className="tick" style={{ fill: "var(--ink-2)" }}>outlet</text>
-        {crit?.h != null && <text x={xs(crit.h) + 6} y={ys(crit.p) - 6} className="tick">critical point</text>}
+        {crit?.h != null && <text x={xs(crit.h) - 6} y={ys(crit.p) + 15} textAnchor="end" className="tick">critical point</text>}
         <g className="axis">
           <line x1={m.l} x2={W - m.r} y1={H - m.b} y2={H - m.b} stroke="var(--line-2)" />
           {xs.ticks.map((t) => <text key={t} x={xs(t)} y={H - m.b + 15} textAnchor="middle">{tickLabel(t, xs.step)}</text>)}
