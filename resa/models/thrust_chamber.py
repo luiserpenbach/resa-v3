@@ -141,6 +141,11 @@ def size(op: OperatingPoint, model) -> ThrustChamberResult:
 
     eps, ns, pe, eps_prov = _resolve_eps(op, model, of)
     cf = _cf(ns, pc, pa, eps, op.eta_cf)
+    if not cf > 0.0:
+        raise ValueError(
+            f"at area ratio {eps:.3g} the nozzle is so over-expanded "
+            f"(exit {pe / _BAR:.3g} bar vs ambient {op.p_amb_bar:.3g} bar) that it makes no net "
+            "thrust — reduce the area ratio or the ambient pressure")
 
     cstar_eff = comb.cstar_ideal_m_s * op.eta_cstar
     at = op.thrust_N / (cf * pc)

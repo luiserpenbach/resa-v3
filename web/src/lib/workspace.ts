@@ -299,27 +299,45 @@ export class BrowserWorkspace implements Workspace {
     };
   }
   async importBundle(bundle: Bundle, author: string) {
-    if (bundle?.format !== "resa-project" || !Array.isArray(bundle.designs)) {
-      throw new ApiError(422, "not a RESA project file");
+    // same checks and normalisation as the server (store.validate_bundle)
+    if (bundle?.format !== "resa-project" || bundle.format_version !== 1 || !Array.isArray(bundle.designs)
+        || !bundle.project || typeof bundle.project.name !== "string" || !bundle.project.name.trim()) {
+      throw new ApiError(422, "not a RESA project file (format resa-project, version 1)");
     }
     const s = this.load();
     const id = uniqueId(slugify(bundle.project.name), Object.keys(s.projects));
     const t = now();
     const lp: LocalProject = {
-      project: { id, name: bundle.project.name, description: bundle.project.description ?? "", created_at: t, created_by: author, updated_at: t },
+      project: { id, name: bundle.project.name.trim().slice(0, 120), description: bundle.project.description ?? "",
+        created_at: t, created_by: author, updated_at: t },
       designs: {},
     };
-    let baselineTaken = false;
+    const idMap = new Map<string, string>();
     for (const d of bundle.designs) {
+      if (!d || typeof d.name !== "string" || !d.name.trim() || typeof d.config !== "object" || !d.config) {
+        throw new ApiError(422, "project file contains a design without a name or configuration");
+      }
       const validId = typeof d.id === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(d.id);
       const did = uniqueId(validId ? d.id : slugify(d.name), Object.keys(lp.designs));
-      const baseline: boolean = !!d.is_baseline && !baselineTaken;
-      baselineTaken ||= baseline;
+      if (typeof d.id === "string") idMap.set(d.id, did);
+      const versions = [...(d.versions ?? [])].sort((a, b) => a.number - b.number);
+      if (new Set(versions.map((v) => v.number)).size !== versions.length) {
+        throw new ApiError(422, `design “${d.name}” has duplicate version numbers`);
+      }
       lp.designs[did] = {
-        meta: { id: did, name: d.name, description: d.description ?? "", status: d.status ?? "concept", revision: 1,
-          updated_at: t, updated_by: author, created_at: t, created_by: author, derived_from: d.derived_from ?? null, is_baseline: baseline },
-        config: clone(d.config), versions: clone(d.versions ?? []),
+        meta: { id: did, name: d.name.trim().slice(0, 120), description: d.description ?? "", status: d.status ?? "concept",
+          revision: 1, updated_at: t, updated_by: author, created_at: t, created_by: author,
+          derived_from: d.derived_from ?? null, is_baseline: false },
+        config: clone(d.config), versions: clone(versions),
       };
+    }
+    // references between designs follow renamed ids; at most one baseline
+    let baselineTaken = false;
+    for (const [i, d] of bundle.designs.entries()) {
+      const meta = Object.values(lp.designs)[i].meta;
+      const src = meta.derived_from;
+      if (src) meta.derived_from = { ...src, design_id: idMap.get(src.design_id) ?? src.design_id };
+      if (d.is_baseline && !baselineTaken) { meta.is_baseline = true; baselineTaken = true; }
     }
     s.projects[id] = lp;
     this.save(s);
@@ -344,12 +362,15 @@ let activeInfo: WorkspaceInfo | null = null;
 export async function connectWorkspace(): Promise<{ ws: Workspace; info: WorkspaceInfo }> {
   if (active && activeInfo) return { ws: active, info: activeInfo };
   const remote = new RemoteWorkspace();
-  let info: WorkspaceInfo;
-  try {
-    info = await remote.info();
-  } catch {
-    info = { storage: "none", writable: false, location: "", examples_available: false };
+  // Only an explicit "no server storage" answer switches to browser storage; a
+  // network error or cold-start failure must not silently fork the workspace.
+  let info: WorkspaceInfo | null = null;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3 && !info; attempt++) {
+    try { info = await remote.info(); }
+    catch (e) { lastError = e; await new Promise((r) => setTimeout(r, 600 * (attempt + 1))); }
   }
+  if (!info) throw lastError instanceof Error ? lastError : new Error("Cannot reach the RESA server");
   if (info.storage === "none") {
     active = new BrowserWorkspace();
     activeInfo = await active.info();

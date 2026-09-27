@@ -71,7 +71,8 @@ export function DesignWorkspace({ source, section, base, crumbs, scratchActions 
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const k = e.key.toLowerCase();
-      const inText = (e.target as HTMLElement)?.tagName === "TEXTAREA";
+      const t = e.target as HTMLElement | null;
+      const inText = !!t && (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || t.isContentEditable || !!t.closest?.(".dialog"));
       if (k === "z" && !inText) { e.preventDefault(); if (e.shiftKey) s.redo(); else s.undo(); }
       else if (k === "y" && !inText) { e.preventDefault(); s.redo(); }
       else if (k === "s") { e.preventDefault(); if (source.kind === "project") setSaving(true); }
@@ -122,7 +123,7 @@ export function DesignWorkspace({ source, section, base, crumbs, scratchActions 
             ...(source.kind === "project" ? [
               { divider: true, label: "", onClick: () => {} },
               ...(["concept", "preliminary", "detailed", "frozen"] as const).map((st) => ({
-                label: <>Mark as <StatusBadge status={st} /></>, onClick: () => s.patchMeta({ status: st }).then(() => toast(`Status set to ${st}`)),
+                label: <>Mark as <StatusBadge status={st} /></>, onClick: () => s.patchMeta({ status: st }).then(() => toast(`Status set to ${st}`), (e) => toast((e as Error).message, "bad")),
               })),
             ] : []),
           ]} />

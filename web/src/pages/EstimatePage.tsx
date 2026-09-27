@@ -76,7 +76,7 @@ function SaveToProjectDialog({ onClose }: { onClose(): void }) {
       setProjects(list);
       // default to the most recent project unless the user already picked
       if (list[0] && !touched.current) setPid(list[0].id);
-    });
+    }).catch((e) => toast((e as Error).message, "bad"));
   }, []);
   const save = async () => {
     if (!ws || !config) return;

@@ -72,8 +72,10 @@ export function NewDesignDialog({ ws, pid, designs, onClose, onCreated, initial 
     } catch (e) { toast((e as Error).message, "bad"); }
   };
 
+  const inflight = useRef(false);
   const create = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || busy || inflight.current) return;
+    inflight.current = true;
     setBusy(true);
     try {
       let d: DesignFull;
@@ -96,6 +98,7 @@ export function NewDesignDialog({ ws, pid, designs, onClose, onCreated, initial 
     } catch (e) {
       toast((e as Error).message, "bad");
       setBusy(false);
+      inflight.current = false;
     }
   };
 

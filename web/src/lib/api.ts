@@ -12,7 +12,10 @@ export class ApiError extends Error {
   status: number;
   detail: Json;
   constructor(status: number, detail: Json) {
-    super(typeof detail === "string" ? detail : detail?.message ?? `Request failed (${status})`);
+    super(typeof detail === "string" ? detail
+      : Array.isArray(detail) && detail[0]?.message ? `${(detail[0].path ?? []).join(".") || "input"}: ${detail[0].message}`
+      : Array.isArray(detail) && detail[0]?.msg ? `${(detail[0].loc ?? []).slice(1).join(".")}: ${detail[0].msg}`
+      : detail?.message ?? `Request failed (${status})`);
     this.status = status;
     this.detail = detail;
   }

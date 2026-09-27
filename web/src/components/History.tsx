@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Change, KPI_META, Kpis, diffDesigns } from "../lib/design";
 import { fmt, relTime } from "../lib/format";
@@ -57,24 +57,33 @@ export function HistoryDrawer({ onClose }: { onClose(): void }) {
 
   const view = async (n: number) => {
     setLoading(n);
-    const { ws } = await connectWorkspace();
-    setOpen(await ws.getVersion(pid, did, n));
-    setLoading(null);
+    try {
+      const { ws } = await connectWorkspace();
+      setOpen(await ws.getVersion(pid, did, n));
+    } catch (e) {
+      toast((e as Error).message, "bad");
+    } finally {
+      setLoading(null);
+    }
   };
   const doRestore = async (v: VersionSummary) => {
     if (!confirm(`Replace the working copy with version ${v.number}? Your current edits stay recoverable with Undo.`)) return;
-    await restore(v.number);
-    toast(`Restored version ${v.number}`);
-    onClose();
+    try {
+      await restore(v.number);
+      toast(`Restored version ${v.number}`);
+      onClose();
+    } catch (e) { toast((e as Error).message, "bad"); }
   };
   const branch = async (v: VersionSummary) => {
     const name = prompt("Name of the new design", `${meta?.name ?? "Design"} (from v${v.number})`);
     if (!name) return;
-    const { ws } = await connectWorkspace();
-    const d = await ws.createDesign(pid, { name, author: authorName(), derived_from: { design_id: did, version: v.number } });
-    toast(`Created “${d.name}”`);
-    onClose();
-    nav(`/p/${pid}/d/${d.id}`);
+    try {
+      const { ws } = await connectWorkspace();
+      const d = await ws.createDesign(pid, { name, author: authorName(), derived_from: { design_id: did, version: v.number } });
+      toast(`Created “${d.name}”`);
+      onClose();
+      nav(`/p/${pid}/d/${d.id}`);
+    } catch (e) { toast((e as Error).message, "bad"); }
   };
 
   return (
@@ -142,15 +151,17 @@ export function SaveVersionDialog({ onClose }: { onClose(): void }) {
     connectWorkspace().then(({ ws }) => ws.getVersion(source.pid, source.did, meta.head_version!)).then(setPrev).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const changes = prev && config ? diffDesigns(prev.config, config) : null;
+  const inflight = useRef(false);
   const submit = async () => {
-    if (!message.trim()) return;
+    if (!message.trim() || busy || inflight.current) return;
+    inflight.current = true;
     if (name.trim() !== author) setAuthor(name.trim());
     setBusy(true);
     try {
       await saveVersion(message.trim());
       toast("Version saved");
       onClose();
-    } catch (e) { toast((e as Error).message, "bad"); setBusy(false); }
+    } catch (e) { toast((e as Error).message, "bad"); setBusy(false); inflight.current = false; }
   };
   return (
     <Dialog wide title={`Save version ${(meta?.head_version ?? 0) + 1}`} sub="A version is a named, permanent snapshot of this design and its key results." onClose={onClose}

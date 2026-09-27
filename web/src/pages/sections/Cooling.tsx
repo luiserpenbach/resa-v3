@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ChartCard, LineChart, PhChart, Series, Shade } from "../../components/charts/Chart";
 import { CrossSection, ProfileInput, ProfileValue } from "../../components/charts/Profile";
 import { Disclosure, Field, Group, NumberField, NumberInput, SegField, Segmented, Select, SelectField, Tabs, Toggle } from "../../components/ui/controls";
@@ -7,7 +7,7 @@ import { Icon } from "../../components/ui/icons";
 import { calc, downloadBlob } from "../../lib/api";
 import { ChannelDefaults, matchPropellant, regenBlock, suggestChannels } from "../../lib/design";
 import { fmt, sig } from "../../lib/format";
-import { useSession } from "../../lib/session";
+import { sessionEpoch, useSession } from "../../lib/session";
 import { toast, useCatalog } from "../../lib/stores";
 import { EngineViewer } from "./Chamber";
 import { CalcError, InputProblems, Inputs, Progress, ResultsHead } from "./common";
@@ -33,7 +33,13 @@ function SetupInputs() {
   const fuel = catalog ? matchPropellant(catalog, config!, "fuel") : undefined;
   const ox = catalog ? matchPropellant(catalog, config!, "oxidizer") : undefined;
   const pr = config?.propellants ?? {};
-  const apply = (regen: Record<string, unknown>) => useSession.getState().replace({ ...config!, regen, cooling: null });
+  // merge only the channel layout into the *current* design (the search takes seconds)
+  const apply = (regen: Record<string, unknown>) => {
+    const cur = useSession.getState().config;
+    if (cur) useSession.getState().replace({ ...cur, regen, cooling: null });
+  };
+  const ctl = useRef<AbortController | null>(null);
+  useEffect(() => () => ctl.current?.abort(), []);
   const create = () => {
     setCoolingNotes([]);
     apply(regenBlock(config!, c));
@@ -41,13 +47,17 @@ function SetupInputs() {
   };
   const assist = async () => {
     setSearching(true);
+    const mine = sessionEpoch();
+    ctl.current?.abort();
+    ctl.current = new AbortController();
     try {
-      const s = await calc.suggestChannels(config!);
+      const s = await calc.suggestChannels(config!, ctl.current.signal);
+      if (mine !== sessionEpoch()) return;
       setCoolingNotes(s.notes);
       apply(s.regen);
       toast(`Layout found after ${s.trials.length} trial solve${s.trials.length === 1 ? "" : "s"}`);
     } catch (e) {
-      toast((e as Error).message, "bad");
+      if ((e as Error).name !== "AbortError" && mine === sessionEpoch()) toast((e as Error).message, "bad");
     } finally {
       setSearching(false);
     }

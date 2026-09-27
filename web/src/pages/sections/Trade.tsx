@@ -44,6 +44,7 @@ export function TradeSection() {
   const r = trade.data;
   const rows = r?.rows.filter((x) => x.ok) ?? [];
   const failed = r?.rows.filter((x) => !x.ok) ?? [];
+  const coolFailed = rows.filter((x) => typeof x.cooling_error === "string");
   const xs = rows.map((x) => x.value as number);
   const shown = OUTPUTS.filter((o) => rows.some((row) => typeof row[o.key] === "number"));
 
@@ -76,6 +77,7 @@ export function TradeSection() {
           Typical questions: how does chamber pressure trade throat size against heat flux? How many channels keep the wall below its limit?
         </Empty>) : (
           <>
+            {coolFailed.length > 0 && <Callout tone="warn">Cooling solve failed for {coolFailed.map((f) => `${sig(f.value as number, 3)} (${f.cooling_error})`).join("; ")}</Callout>}
             {failed.length > 0 && <Callout tone="warn">{failed.length} case{failed.length > 1 ? "s" : ""} could not be computed: {failed.map((f) => `${sig(f.value as number, 3)} (${f.error})`).join("; ")}</Callout>}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
               {shown.map((o) => (

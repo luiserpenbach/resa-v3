@@ -29,7 +29,7 @@ function HeatInputs() {
         <Field label="Hot-wall temperature" hint="The gas-side wall temperature you are designing for. Lower wall → more heat flux.">
           <div className="row">
             <input className="slider" type="range" min={300} max={1600} step={10} value={wallTemp} onChange={(e) => setWallTemp(Number(e.target.value))} />
-            <div style={{ width: 110 }}><NumberInput value={wallTemp} unit="K" onChange={(v) => v && v > 100 && setWallTemp(v)} /></div>
+            <div style={{ width: 110 }}><NumberInput value={wallTemp} unit="K" onChange={(v) => v && v > 100 && v < 4000 && setWallTemp(v)} /></div>
           </div>
         </Field>
         <NumberField path={["chamber", "bartz_correction"]} label="Heat-transfer factor" sym="× Bartz"

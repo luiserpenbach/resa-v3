@@ -169,11 +169,13 @@ export function NewProjectDialog({ ws, onClose, onCreated }: { ws: Workspace; on
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
+  const inflight = useRef(false);
   const submit = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || busy || inflight.current) return;
+    inflight.current = true;
     setBusy(true);
     try { onCreated(await ws.createProject(name.trim(), desc.trim(), authorName())); }
-    catch (e) { toast((e as Error).message, "bad"); setBusy(false); }
+    catch (e) { toast((e as Error).message, "bad"); setBusy(false); inflight.current = false; }
   };
   return (
     <Dialog title="New project" sub="One project per engine program. It holds the program’s engine designs and their history." onClose={onClose}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { TopBar } from "../App";
 import { NewDesignDialog } from "../components/NewDesignDialog";
@@ -23,6 +23,7 @@ export default function ProjectPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [live, setLive] = useState<Record<string, Kpis | "pending">>({});
+  const computed = useRef(new Set<string>());   // designs whose live KPIs finished
 
   const load = async (w: Workspace) => {
     try {
@@ -31,7 +32,9 @@ export default function ProjectPage() {
       setDesigns(r.designs);
     } catch (e) { setError((e as Error).message); }
   };
-  useEffect(() => { connectWorkspace().then(({ ws }) => { setWs(ws); void load(ws); }); }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    connectWorkspace().then(({ ws }) => { setWs(ws); void load(ws); }, (e) => setError((e as Error).message));
+  }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const baseline = designs?.find((d) => d.is_baseline);
 
@@ -39,7 +42,7 @@ export default function ProjectPage() {
   // results from the working copy in the background, two at a time.
   useEffect(() => {
     if (!ws || !designs) return;
-    const todo = designs.filter((d) => !Object.keys(d.kpis ?? {}).length && !live[d.id]);
+    const todo = designs.filter((d) => !Object.keys(d.kpis ?? {}).length && !computed.current.has(d.id));
     if (!todo.length) return;
     let cancelled = false;
     setLive((l) => ({ ...l, ...Object.fromEntries(todo.map((d) => [d.id, "pending" as const])) }));
@@ -51,14 +54,18 @@ export default function ProjectPage() {
           const perf = await calc.performance(full.config);
           const heat = await calc.heatFlux(full.config, 800).catch(() => null);
           const cool = full.config.regen ? await calc.cooling(full.config, "preview").catch(() => null) : null;
-          if (!cancelled) setLive((l) => ({ ...l, [d!.id]: collectKpis(perf, heat, cool) }));
+          if (!cancelled) { computed.current.add(d.id); setLive((l) => ({ ...l, [d!.id]: collectKpis(perf, heat, cool) })); }
         } catch {
-          if (!cancelled) setLive((l) => ({ ...l, [d!.id]: {} }));
+          if (!cancelled) { computed.current.add(d.id); setLive((l) => ({ ...l, [d!.id]: {} })); }
         }
       }
     };
     void Promise.all([worker(), worker()]);
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // unfinished cells go back to "not computed" so the next run picks them up
+      setLive((l) => Object.fromEntries(Object.entries(l).filter(([, v]) => v !== "pending")));
+    };
   }, [ws, designs]); // eslint-disable-line react-hooks/exhaustive-deps
   const kpisOf = (d: DesignSummary): { k: Record<string, unknown>; live: boolean; pending: boolean } => {
     if (Object.keys(d.kpis ?? {}).length) return { k: d.kpis, live: false, pending: false };
@@ -66,11 +73,11 @@ export default function ProjectPage() {
     return l === "pending" || !l ? { k: {}, live: true, pending: l === "pending" } : { k: l as Record<string, unknown>, live: true, pending: false };
   };
 
-  const exportProject = async () => {
+  const exportProject = () => act(async () => {
     if (!ws || !project) return;
     const b = await ws.exportProject(pid);
     downloadText(JSON.stringify(b, null, 2), `${project.id}.resa-project.json`, "application/json");
-  };
+  });
   const deleteProject = async () => {
     if (!ws || !project) return;
     if (!confirm(`Delete the project “${project.name}” and all its designs?${ws.kind === "server" ? " (It is moved to the workspace trash.)" : ""}`)) return;
@@ -78,21 +85,24 @@ export default function ProjectPage() {
     toast("Project deleted");
     nav("/");
   };
-  const setBaseline = async (d: DesignSummary) => {
+  const act = async (fn: () => Promise<unknown>) => {
+    try { await fn(); } catch (e) { toast((e as Error).message, "bad"); }
+  };
+  const setBaseline = (d: DesignSummary) => act(async () => {
     if (!ws) return;
     await ws.updateDesign(pid, d.id, { is_baseline: !d.is_baseline, author: authorName() });
     await load(ws);
-  };
-  const removeDesign = async (d: DesignSummary) => {
+  });
+  const removeDesign = (d: DesignSummary) => act(async () => {
     if (!ws || !confirm(`Delete the design “${d.name}”?`)) return;
     await ws.deleteDesign(pid, d.id);
     await load(ws);
-  };
-  const duplicate = async (d: DesignSummary) => {
+  });
+  const duplicate = (d: DesignSummary) => act(async () => {
     if (!ws) return;
     const n = await ws.createDesign(pid, { name: `${d.name} copy`, author: authorName(), derived_from: { design_id: d.id } });
     nav(`/p/${pid}/d/${n.id}`);
-  };
+  });
 
   if (error) return <><TopBar crumbs={[{ label: "Not found" }]} /><div className="page"><Empty title="Project not found">{error}</Empty></div></>;
 
@@ -207,7 +217,10 @@ function EditProjectDialog({ ws, project, onClose, onSaved }: { ws: Workspace; p
   return (
     <Dialog title="Project details" onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!name.trim()}
-        onClick={async () => onSaved(await ws.updateProject(project.id, { name: name.trim(), description: desc.trim() }))}>Save</button></>}>
+        onClick={async () => {
+          try { onSaved(await ws.updateProject(project.id, { name: name.trim(), description: desc.trim() })); }
+          catch (e) { toast((e as Error).message, "bad"); }
+        }}>Save</button></>}>
       <Field label="Project name"><input className="plain-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Field label="Description"><textarea className="textarea" value={desc} onChange={(e) => setDesc(e.target.value)} /></Field>
     </Dialog>

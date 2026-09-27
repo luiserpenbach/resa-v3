@@ -140,3 +140,12 @@ def test_layout_assistant_returns_a_valid_regen_block(regen_design):
     assert client.post("/api/calc/validate", json={"design": d}).json()["ok"]
     cool = client.post("/api/calc/cooling", json={"design": d}).json()
     assert cool["ok"], cool
+
+
+def test_hopelessly_overexpanded_nozzle_says_so(regen_design):
+    d = copy.deepcopy(regen_design)
+    d["regen"] = None
+    d["operating_point"].update(eps=500.0, pe_bar=None, p_amb_bar=1.01325)
+    r = client.post("/api/calc/performance", json={"design": d})
+    assert r.status_code == 400
+    assert "over-expanded" in r.json()["detail"]

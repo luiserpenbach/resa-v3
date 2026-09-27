@@ -69,12 +69,25 @@ const SAVE_DELAY = 1200;
 let ws: Workspace | null = null;
 let calcTimer: ReturnType<typeof setTimeout> | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-let savePromise: Promise<void> | null = null;
 const controllers: Partial<Record<string, AbortController>> = {};
 let past: Design[] = [];
 let future: Design[] = [];
 let lastEdit = { key: "", at: 0 };
 let computedKey = "";
+
+// Every open() starts a new session epoch; async work captures the epoch it
+// started in and drops its result when the user has moved on meanwhile.
+let epoch = 0;
+let calcGen = 0;
+let coolGen = 0;
+// Saves outlive the session that queued them (navigating away still saves the
+// last edit); revisions and last-saved configs are therefore kept per design.
+let savePromise: Promise<void> | null = null;
+const revisions = new Map<string, number>();
+const lastSaved = new Map<string, Design>();
+
+/** Token for async UI work: compare before applying a late result. */
+export const sessionEpoch = () => epoch;
 
 function abortable(key: string): AbortSignal {
   controllers[key]?.abort();
@@ -117,15 +130,68 @@ export const useSession = create<SessionState>((set, get) => {
     }));
   }
 
+  function persist(config: Design) {
+    if (get().source?.kind === "scratch") writeScratch(config);
+    else scheduleSave();
+  }
+
+  /** Resolves once no calculation for the open design is pending. */
+  function whenSettled(timeoutMs = 90_000): Promise<void> {
+    const idle = () => { const s = get(); return !s.perf.loading && !s.heat.loading && !s.cool.loading; };
+    return new Promise((resolve) => {
+      if (idle()) return resolve();
+      const stop = setTimeout(() => { unsub(); resolve(); }, timeoutMs);
+      const unsub = useSession.subscribe(() => { if (idle()) { clearTimeout(stop); unsub(); resolve(); } });
+    });
+  }
+
+  /** Save `config` as the draft of pid/did. Serialized; applies its result
+   *  to the store only while the same session is still open. */
+  function queueSave(pid: string, did: string, config: Design, mine: number): Promise<void> {
+    const key = `${pid}/${did}`;
+    const current = () => mine === epoch;
+    const prev = savePromise;                      // saves run strictly one after another
+    const run = (async () => {
+      if (prev) await prev.catch(() => undefined);
+      if (lastSaved.get(key) === config) {
+        if (current() && get().config === config) set({ saveState: "saved" });
+        return;
+      }
+      if (current()) set({ saveState: "saving" });
+      try {
+        const r = await ws!.saveDraft(pid, did, config, revisions.get(key) ?? 1, authorName());
+        revisions.set(key, r.revision);
+        lastSaved.set(key, config);
+        if (!current()) return;
+        const stillSame = get().config === config;
+        set((st) => ({
+          meta: st.meta ? { ...st.meta, revision: r.revision, updated_at: r.updated_at, has_unsaved_changes: r.has_unsaved_changes } : st.meta,
+          saveState: stillSame ? "saved" : "dirty",
+        }));
+        if (!stillSame) scheduleSave();
+      } catch (e) {
+        const conflict = e instanceof ConflictError;
+        if (current()) set({ saveState: conflict ? "conflict" : "error" });
+        toast(conflict ? "This design was changed elsewhere — reload to see the latest version."
+          : `Could not save${current() ? "" : " your last edit"}: ${msg(e)}`, "bad");
+      }
+    })();
+    savePromise = run;
+    void run.finally(() => { if (savePromise === run) savePromise = null; });
+    return run;
+  }
+
   async function runCooling(config: Design) {
     if (!config.regen) { slot("cool", { data: null, loading: false, error: null, stale: false }); return; }
+    const mine = epoch, gen = ++coolGen;
     const signal = abortable("cool");
     slot("cool", { loading: true });
     try {
       const r = await calc.cooling(config, get().fidelity, signal);
+      if (mine !== epoch || gen !== coolGen) return;
       slot("cool", { data: r, loading: false, error: r.ok ? null : r.error ?? "Cooling solve failed", stale: false });
     } catch (e) {
-      if (!isAbort(e)) slot("cool", { loading: false, error: msg(e) });
+      if (!isAbort(e) && mine === epoch && gen === coolGen) slot("cool", { loading: false, error: msg(e) });
     }
   }
 
@@ -139,6 +205,7 @@ export const useSession = create<SessionState>((set, get) => {
 
     async open(source) {
       get().close();
+      const mine = ++epoch;
       set({ source, loadError: null });
       try {
         if (source.kind === "scratch") {
@@ -148,23 +215,31 @@ export const useSession = create<SessionState>((set, get) => {
         } else {
           ws = (await connectWorkspace()).ws;
           const [d, p] = await Promise.all([ws.getDesign(source.pid, source.did), ws.getProject(source.pid)]);
+          if (mine !== epoch) return;
           const { config, ...meta } = d;
+          revisions.set(`${source.pid}/${source.did}`, d.revision);
+          lastSaved.set(`${source.pid}/${source.did}`, config);
           set({ config, meta, projectName: p.project.name, saveState: "saved" });
           void get().refreshVersions();
         }
         computedKey = "";
         get().recompute();
       } catch (e) {
-        set({ loadError: msg(e) });
+        if (mine === epoch) set({ loadError: msg(e) });
       }
     },
 
     close() {
       clearTimeout(calcTimer);
-      if (get().saveState === "dirty") void get().flush();
       clearTimeout(saveTimer);
+      const s = get();
+      // the last edit of the design we are leaving still gets saved
+      if (s.source?.kind === "project" && s.config && ws && s.saveState !== "saved" && s.saveState !== "conflict") {
+        void queueSave(s.source.pid, s.source.did, s.config, epoch);
+      }
       Object.values(controllers).forEach((c) => c?.abort());
-      past = []; future = []; computedKey = "";
+      past = []; future = []; computedKey = ""; lastEdit = { key: "", at: 0 };
+      epoch++;
       set({
         source: null, meta: null, config: null, errors: [], versions: [], coolingNotes: [], canUndo: false, canRedo: false,
         perf: empty(), heat: empty(), cool: empty(), geo: empty(), range: empty(), trade: empty(), saveState: "saved",
@@ -199,8 +274,7 @@ export const useSession = create<SessionState>((set, get) => {
       set({ config: next, canUndo: past.length > 0, canRedo: false });
       markStale();
       scheduleCalc();
-      if (get().source?.kind === "scratch") writeScratch(next);
-      else scheduleSave();
+      persist(next);
     },
 
     replace(config) {
@@ -211,8 +285,7 @@ export const useSession = create<SessionState>((set, get) => {
       set({ config, canUndo: past.length > 0, canRedo: false });
       markStale();
       scheduleCalc(50);
-      if (get().source?.kind === "scratch") writeScratch(config);
-      else scheduleSave();
+      persist(config);
     },
 
     undo() {
@@ -224,7 +297,7 @@ export const useSession = create<SessionState>((set, get) => {
       set({ config: prev, canUndo: past.length > 0, canRedo: true });
       markStale();
       scheduleCalc(120);
-      if (get().source?.kind === "scratch") writeScratch(prev); else scheduleSave();
+      persist(prev);
     },
 
     redo() {
@@ -232,10 +305,11 @@ export const useSession = create<SessionState>((set, get) => {
       const next = future.pop();
       if (!cur || !next) return;
       past.push(cur);
+      lastEdit = { key: "", at: 0 };
       set({ config: next, canUndo: true, canRedo: future.length > 0 });
       markStale();
       scheduleCalc(120);
-      if (get().source?.kind === "scratch") writeScratch(next); else scheduleSave();
+      persist(next);
     },
 
     setWallTemp(t) {
@@ -257,25 +331,32 @@ export const useSession = create<SessionState>((set, get) => {
       const key = JSON.stringify(config) + `|${s.wallTemp}`;
       if (!force && key === computedKey && !s.perf.stale && !s.heat.stale) return;
       computedKey = key;
+      const mine = epoch, gen = ++calcGen;
+      const live = () => mine === epoch && gen === calcGen;
+      const willCool = !!config.regen && (s.section === "cooling" || s.section === "summary" || !!s.cool.data);
       const signal = abortable("perf");
       slot("perf", { loading: true });
       slot("heat", { loading: true });
+      if (willCool) slot("cool", { loading: true });
       (async () => {
         try {
           const perf = await calc.performance(config, signal);
+          if (!live()) return;
           set({ errors: [] });
           slot("perf", { data: perf, loading: false, error: null, stale: false });
           try {
             const heat = await calc.heatFlux(config, get().wallTemp, abortable("heat"));
+            if (!live()) return;
             slot("heat", { data: heat, loading: false, error: null, stale: false });
           } catch (e) {
-            if (!isAbort(e)) slot("heat", { loading: false, error: msg(e) });
+            if (isAbort(e) || !live()) return;
+            slot("heat", { loading: false, error: msg(e) });
           }
-          const sec = get().section;
-          if (config.regen && (sec === "cooling" || sec === "summary" || get().cool.data)) void runCooling(config);
+          if (willCool) void runCooling(config);
           if (get().geo.data && config.regen) void get().loadGeometry(get().geo.data?.section.x_m ?? null);
         } catch (e) {
-          if (isAbort(e)) return;
+          if (isAbort(e) || !live()) return;
+          if (willCool) slot("cool", { loading: false });
           if (e instanceof ApiError && e.status === 422) {
             set({ errors: e.fieldErrors });
             slot("perf", { loading: false, error: null });
@@ -292,82 +373,68 @@ export const useSession = create<SessionState>((set, get) => {
     async runRange() {
       const config = get().config;
       if (!config) return;
+      const mine = epoch;
       const signal = abortable("range");
       slot("range", { loading: true, error: null });
       try {
         const r = await calc.offdesign(config, signal);
-        slot("range", { data: r, loading: false, error: r.ok ? null : r.error ?? "Failed", stale: false });
+        if (mine === epoch) slot("range", { data: r, loading: false, error: r.ok ? null : r.error ?? "Failed", stale: false });
       } catch (e) {
-        if (!isAbort(e)) slot("range", { loading: false, error: msg(e) });
+        if (!isAbort(e) && mine === epoch) slot("range", { loading: false, error: msg(e) });
       }
     },
 
     async runTrade(parameter, values, include) {
       const config = get().config;
       if (!config) return;
+      const mine = epoch;
       const signal = abortable("trade");
       slot("trade", { loading: true, error: null });
       try {
         const r = await calc.trade(config, parameter, values, include, signal);
-        slot("trade", { data: r, loading: false, error: null, stale: false });
+        if (mine === epoch) slot("trade", { data: r, loading: false, error: null, stale: false });
       } catch (e) {
-        if (!isAbort(e)) slot("trade", { loading: false, error: msg(e) });
+        if (!isAbort(e) && mine === epoch) slot("trade", { loading: false, error: msg(e) });
       }
     },
 
     async loadGeometry(x_m = null) {
       const config = get().config;
       if (!config?.regen) return;
+      const mine = epoch;
       const signal = abortable("geo");
       slot("geo", { loading: true });
       try {
         const r = await calc.geometry(config, x_m, signal);
-        slot("geo", { data: r, loading: false, error: null, stale: false });
+        if (mine === epoch) slot("geo", { data: r, loading: false, error: null, stale: false });
       } catch (e) {
-        if (!isAbort(e)) slot("geo", { loading: false, error: msg(e) });
+        if (!isAbort(e) && mine === epoch) slot("geo", { loading: false, error: msg(e) });
       }
     },
 
     async flush() {
       clearTimeout(saveTimer);
+      while (savePromise) await savePromise;       // let an in-flight save land first
       const s = get();
-      if (s.source?.kind !== "project" || !s.meta || !s.config || !ws) return;
+      if (s.source?.kind !== "project" || !s.config || !ws) return;
       if (s.saveState !== "dirty" && s.saveState !== "error") return;
-      if (savePromise) { await savePromise; if (get().saveState !== "dirty") return; }
-      const { pid, did } = s.source;
-      const config = s.config;
-      set({ saveState: "saving" });
-      savePromise = (async () => {
-        try {
-          const r = await ws!.saveDraft(pid, did, config, get().meta!.revision, authorName());
-          const stillSame = get().config === config;
-          set((st) => ({
-            meta: st.meta ? { ...st.meta, revision: r.revision, updated_at: r.updated_at, has_unsaved_changes: r.has_unsaved_changes } : st.meta,
-            saveState: stillSame ? "saved" : "dirty",
-          }));
-          if (!stillSame) scheduleSave();
-        } catch (e) {
-          if (e instanceof ConflictError) {
-            set({ saveState: "conflict" });
-            toast("This design was changed elsewhere — reload to see the latest version.", "bad");
-          } else {
-            set({ saveState: "error" });
-            toast(`Could not save: ${msg(e)}`, "bad");
-          }
-        } finally {
-          savePromise = null;
-        }
-      })();
-      await savePromise;
+      await queueSave(s.source.pid, s.source.did, s.config, epoch);
     },
 
     async saveVersion(message) {
       const s = get();
       if (s.source?.kind !== "project" || !ws) return;
-      await get().flush();
-      if (get().saveState === "conflict" || get().saveState === "error") throw new Error("Save the working copy first");
+      const mine = epoch;
       const { pid, did } = s.source;
+      // snapshot key results of exactly the config being versioned
+      clearTimeout(calcTimer);
+      if (get().perf.stale || get().heat.stale || (get().config?.regen && get().cool.stale && get().cool.data)) get().recompute();
+      await whenSettled();
+      await get().flush();
+      if (mine !== epoch) throw new Error("The design was closed before the version was saved");
+      if (get().saveState === "conflict" || get().saveState === "error") throw new Error("Save the working copy first");
       const v = await ws.createVersion(pid, did, message, authorName(), get().kpis() as Record<string, unknown>);
+      if (mine !== epoch) return;
       set((st) => ({ meta: st.meta ? { ...st.meta, head_version: v.number, has_unsaved_changes: false, kpis: v.kpis } : st.meta }));
       await get().refreshVersions();
     },
@@ -375,11 +442,20 @@ export const useSession = create<SessionState>((set, get) => {
     async restore(n) {
       const s = get();
       if (s.source?.kind !== "project" || !ws) return;
+      const mine = epoch;
+      const { pid, did } = s.source;
       await get().flush();
-      const d = await ws.restoreVersion(s.source.pid, s.source.did, n, authorName());
+      const d = await ws.restoreVersion(pid, did, n, authorName());
+      const key = `${pid}/${did}`;
+      revisions.set(key, Math.max(revisions.get(key) ?? 0, d.revision));
       const { config, ...meta } = d;
-      if (s.config) past.push(s.config);
-      set({ config, meta, saveState: "saved", canUndo: past.length > 0 });
+      lastSaved.set(key, config);
+      if (mine !== epoch) return;
+      const cur = get().config;
+      if (cur) past.push(cur);
+      future = [];
+      lastEdit = { key: "", at: 0 };
+      set({ config, meta, saveState: "saved", canUndo: past.length > 0, canRedo: false });
       markStale();
       computedKey = "";
       get().recompute();
@@ -388,16 +464,24 @@ export const useSession = create<SessionState>((set, get) => {
     async refreshVersions() {
       const s = get();
       if (s.source?.kind !== "project" || !ws) return;
+      const mine = epoch;
       try {
-        set({ versions: await ws.listVersions(s.source.pid, s.source.did) });
+        const versions = await ws.listVersions(s.source.pid, s.source.did);
+        if (mine === epoch) set({ versions });
       } catch { /* keep list */ }
     },
 
     async patchMeta(patch) {
       const s = get();
       if (s.source?.kind !== "project" || !ws) return;
+      const mine = epoch;
+      const key = `${s.source.pid}/${s.source.did}`;
       const d = await ws.updateDesign(s.source.pid, s.source.did, { ...patch, author: authorName() });
-      set((st) => ({ meta: st.meta ? { ...st.meta, ...d } : st.meta }));
+      revisions.set(key, Math.max(revisions.get(key) ?? 0, d.revision));
+      if (mine !== epoch) return;
+      // a PATCH answered before a concurrent draft PUT must not move the revision back
+      set((st) => ({ meta: st.meta ? { ...st.meta, ...d, revision: Math.max(st.meta.revision, d.revision),
+        has_unsaved_changes: st.meta.has_unsaved_changes } : st.meta }));
     },
 
     kpis() {

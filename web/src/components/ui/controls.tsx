@@ -55,6 +55,7 @@ export function NumberInput({ value, onChange, unit, scale = 1, placeholder, dis
   };
 
   const nudge = (dir: 1 | -1, big: boolean) => {
+    if (text.trim() === "") return;
     const cur = Number(text.replace(",", "."));
     if (!Number.isFinite(cur)) return;
     const d = decimalsOf(text);

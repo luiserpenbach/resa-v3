@@ -442,6 +442,8 @@ def trade_study(design: dict[str, Any], parameter: str, values: list[float],
                     s = c["summary"]
                     row.update(T_wall_max_K=s.get("T_wall_max_K"), wall_margin_K=s.get("wall_margin_K"),
                                dp_bar=s.get("dp_bar"), outlet_T_K=s.get("outlet_T_K"))
+                else:
+                    row["cooling_error"] = str(c.get("error", "cooling solve failed"))
         except (ValidationError, ValueError, RuntimeError) as exc:
             msg = validation_errors(exc)[0]["message"] if isinstance(exc, ValidationError) else str(exc)
             row.update(ok=False, error=msg)
