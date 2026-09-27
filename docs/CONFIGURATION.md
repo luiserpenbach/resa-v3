@@ -157,9 +157,9 @@ Top-level keys for a full engine definition:
 |-----|----------|-------------|
 | `engine` | yes | Human-readable engine name (used in reports) |
 | `propellants` | yes | Propellant pair and delivery temperatures |
-| `combustion` | yes | CEA table or rocketcea backend |
+| `combustion` | yes | CEA table, NASA CEA (`cea`) or rocketcea backend |
 | `chamber` | yes | Contour / chamber geometry generation |
-| `cooling` | yes | Simple cooling sanity-check block |
+| `cooling` | no | Legacy throat-fit check block (superseded by `regen`) |
 | `operating_point` | design | Targets → geometry sizing |
 | `analyze_point` | analyze | Measured flows → performance |
 | `geometry` | analyze | Measured throat / exit geometry |
@@ -196,12 +196,25 @@ when those differ from the configured temperatures.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `backend` | `"table"` \| `"rocketcea"` | `"table"` | Property source |
+| `backend` | `"table"` \| `"cea"` \| `"rocketcea"` | `"table"` | Property source: a CEA table from file, NASA CEA (`pip install cea`, prebuilt wheels — no Fortran toolchain), or rocketcea |
 | `table` | object | — | Required when `backend: table` |
-| `nozzle_flow` | `single_gamma` \| `equilibrium` \| `frozen` \| `frozen_at_throat` | `single_gamma` | Nozzle expansion model for C_F, exit pressure and exit Mach. `single_gamma` applies the isentropic relations with the chamber gamma (only option for tables). The CEA modes (rocketcea) expand with shifting equilibrium, composition frozen at the chamber (conservative; c* is the frozen value too) or equilibrium to the throat then frozen. |
-| `use_delivery_temperatures` | bool | `false` | Build CEA propellant cards at `propellants.*_temp_K` / `*_phase` (enthalpy shifted from the reference card with CoolProp) instead of rocketcea's defaults |
+| `nozzle_flow` | `single_gamma` \| `equilibrium` \| `frozen` \| `frozen_at_throat` | `single_gamma` | Nozzle expansion model for C_F, exit pressure and exit Mach. `single_gamma` applies the isentropic relations with the chamber gamma (only option for tables). The CEA modes (`cea` / `rocketcea`) expand with shifting equilibrium, composition frozen at the chamber (conservative; c* is the frozen value too) or equilibrium to the throat then frozen. |
+| `use_delivery_temperatures` | bool | `false` | Build CEA propellant cards at `propellants.*_temp_K` / `*_phase` (enthalpy shifted from the reference card with CoolProp) instead of the CEA reference states (`cea` / `rocketcea`) |
 
-Every rocketcea run also reports the **ideal vacuum Isp band** (single-gamma,
+**NASA CEA backend (`backend: cea`).** Equilibrium runs use the CEA rocket
+solver directly; the frozen branches are integrated in RESA from CEA species
+thermodynamics (isentropic, fixed composition), because cea 3.3's own frozen
+solve does not converge for common pairs. Results agree with rocketcea to
+within ~0.1 % (c*, Tc, γ, Isp, transport; RP-1 ~0.2 % from its different
+surrogate data) — `tests/test_nasa_cea.py` pins the reference values.
+Propellants are matched by `cea_oxidizer` / `cea_fuel` or the CoolProp name
+(rocketcea card names such as `LOX`, `LH2`, `GOX`, `N2O`, `C2H5OH`, `RP1`,
+`CH4`, `MMH`, `N2O4` all work). **When `backend: rocketcea` is requested but
+rocketcea is not installed, NASA CEA stands in automatically** and the run
+carries a warning saying so — existing configs keep working on hosts without
+a Fortran compiler.
+
+Every CEA run (`cea` or `rocketcea`) also reports the **ideal vacuum Isp band** (single-gamma,
 equilibrium, frozen-at-throat, frozen) and warns when the single-gamma value
 departs from CEA equilibrium by more than 2 % or when, below 15 bar, the
 equilibrium-frozen spread suggests early kinetic freezing.
@@ -303,7 +316,8 @@ Controls Rao/Bell (or conical) contour generation.
 
 ### `cooling`
 
-Simple regen layout used for pipeline sanity checks (circumference fit). Not the
+Optional since RESA Studio 2 — new designs describe the channels only in
+`regen:`. Legacy simple regen layout used for pipeline sanity checks (circumference fit). Not the
 high-fidelity regen solver — use the `regen:` block for that. When a `regen:`
 block exists the pipeline warns if this block disagrees with the regen layout
 (channel count, throat width, height, wall) so reports cannot show the wrong

@@ -297,7 +297,7 @@ def run_regen(
         if a.get("hot_gas_fallback_properties"):
             warnings.append(
                 f"regen: Bartz uses fallback transport properties ({a['hot_gas_property_note']}) "
-                "— sync CEA transport (rocketcea) or set solver.hot_gas.mu_pa_s/pr/cp_J_kgK"
+                "— sync CEA transport (rocketcea / cea backend) or set solver.hot_gas.mu_pa_s/pr/cp_J_kgK"
             )
         if a.get("stress_checked") and a["stress_ratio_max"] > a["stress_ratio_warn"]:
             i = int(results.stress_ratio.idxmax())

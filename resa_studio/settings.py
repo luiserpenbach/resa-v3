@@ -31,7 +31,8 @@ REPO_ROOT = _repo_root()
 OUT_ROOT = Path(os.environ.get("RESA_OUT_ROOT", REPO_ROOT / "out")).resolve()
 CONFIGS_ROOT = Path(os.environ.get("RESA_CONFIGS_ROOT", REPO_ROOT / "configs")).resolve()
 PROJECTS_ROOT = Path(os.environ.get("RESA_PROJECTS_ROOT", CONFIGS_ROOT / "projects")).resolve()
-FRONTEND_DIR = REPO_ROOT / "frontend" / "public"
+FRONTEND_DIR = REPO_ROOT / "frontend" / "public"          # classic UI (served at /classic)
+WEB_DIST = Path(os.environ.get("RESA_WEB_DIST", REPO_ROOT / "web" / "dist")).resolve()  # Studio 2
 
 
 def rel_to(path: Path | str, root: Path) -> str:

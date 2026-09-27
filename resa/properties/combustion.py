@@ -25,8 +25,9 @@ backend='rocketcea': live CEA per call (needs fortran toolchain). Nozzle
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Optional
 
 import numpy as np
@@ -152,6 +153,19 @@ class TableModel:
 # --------------------------------------------------------------------------- #
 # ROCKETCEA backend
 # --------------------------------------------------------------------------- #
+# rocketcea drives a Fortran library with global state: concurrent calls from
+# server threads return garbage (e.g. Pr = 0). Serialize every call.
+_CEA_LOCK = threading.RLock()
+
+
+def _locked(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _CEA_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
+
 @lru_cache(maxsize=32)
 def _cea_obj(ox: str, fuel: str):
     from rocketcea.cea_obj_w_units import CEA_Obj  # noqa: deferred import
@@ -278,6 +292,7 @@ def _delivery_card(role: str, coolprop_name: str, cea_name: str, T: float,
     return name, desc
 
 
+@_locked
 def _register_card(role: str, name: str, card: str) -> None:
     """Register once: rocketcea clears its whole run cache when an existing
     name is re-registered, which would orphan the cached CEA objects."""
@@ -313,6 +328,7 @@ class CeaModel:
     def _flags(self) -> tuple[int, int]:
         return _FROZEN_FLAGS.get(self.nozzle_flow, (0, 0))
 
+    @_locked
     def at(self, of: float, pc_bar: float | None = None) -> CombustionResult:
         pc = pc_bar or 25.0
         cea = self._cea()
@@ -332,6 +348,7 @@ class CeaModel:
             nozzle_flow=self.nozzle_flow,
         )
 
+    @_locked
     def _cea_nozzle(self, of: float, pc_bar: float, eps: float, flow: str
                     ) -> NozzleState:
         cea = self._cea()
@@ -350,6 +367,7 @@ class CeaModel:
             return single_gamma_nozzle(eps, self.at(of, pc_bar).gamma)
         return self._cea_nozzle(of, pc_bar, eps, self.nozzle_flow)
 
+    @_locked
     def eps_for_pe(self, of: float, pc_bar: float, pe_bar: float
                    ) -> tuple[float, NozzleState]:
         g = self.at(of, pc_bar).gamma
@@ -362,6 +380,7 @@ class CeaModel:
             Pc=pc_bar, MR=of, PcOvPe=pc_bar / pe_bar, frozen=fr, frozenAtThroat=fat))
         return eps, self._cea_nozzle(of, pc_bar, eps, self.nozzle_flow)
 
+    @_locked
     def transport(self, of: float, pc_bar: float | None = None) -> dict:
         """Chamber transport properties, frozen and equilibrium basis (SI)."""
         pc = pc_bar or 25.0
@@ -378,6 +397,7 @@ class CeaModel:
             "mu_throat_Pa_s": float(mu_t) * 0.1,
         }
 
+    @_locked
     def reference(self, of: float, pc_bar: float, eps: float) -> dict:
         """Ideal vacuum Isp [s] of every nozzle-flow model at this point."""
         comb_eq_cstar = float(self._cea().get_Cstar(Pc=pc_bar, MR=of))
@@ -391,7 +411,7 @@ class CeaModel:
         return out
 
 
-CombustionModel = TableModel | CeaModel
+CombustionModel = TableModel | CeaModel  # | nasa_cea.NasaCeaModel
 
 
 def build_model(
@@ -415,14 +435,26 @@ def build_model(
             gamma=as_arr(t.gamma), mw=as_arr(t.mw_kg_kmol),
             mu=opt(t.mu_pa_s), pr=opt(t.pr), cp=opt(t.cp_J_kgK),
         )
+    if comb.backend == "cea":
+        from .nasa_cea import build_nasa_model
+        return build_nasa_model(prop, comb, ox_temp_K=ox_temp_K, fuel_temp_K=fuel_temp_K,
+                                pc_hint_bar=pc_hint_bar)
     if comb.backend == "rocketcea":
         try:
             import rocketcea  # noqa: F401
         except ImportError as e:
-            raise RuntimeError(
-                "backend='rocketcea' needs rocketcea installed (fortran "
-                "toolchain). Use backend='table' otherwise."
-            ) from e
+            from .nasa_cea import available, build_nasa_model
+            if not available():
+                raise RuntimeError(
+                    "backend='rocketcea' needs rocketcea installed (fortran "
+                    "toolchain), or the NASA CEA package (pip install cea). "
+                    "Use backend='table' otherwise."
+                ) from e
+            # same chemistry, no Fortran toolchain: NASA CEA stands in
+            return build_nasa_model(
+                prop, comb, ox_temp_K=ox_temp_K, fuel_temp_K=fuel_temp_K,
+                pc_hint_bar=pc_hint_bar,
+                note="rocketcea is not installed — NASA CEA (backend 'cea') was used instead")
         ox = prop.cea_oxidizer or prop.oxidizer
         fuel = prop.cea_fuel or prop.fuel
         info = {}

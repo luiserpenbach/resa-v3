@@ -26,3 +26,6 @@ Thumbs.db
 regen_channel/
 
 spark50_cooling_study_output/
+
+# Studio workspace trash (deleted projects / designs)
+workspace/.trash/

@@ -87,7 +87,11 @@ def preview_contour(data: dict[str, Any]) -> dict[str, Any]:
 
 def _synth_regen(cfg: EngineConfig) -> RegenConfig:
     """Build a preview-only regen layout from engine cooling scalars."""
-    cool = cfg.cooling
+    from resa.config.schema import CoolingConfig
+    cool = cfg.cooling or CoolingConfig(
+        coolant=cfg.propellants.fuel, n_channels=40, channel_width_m=1.5e-3,
+        channel_height_m=2.0e-3, rib_width_m=1.0e-3, inner_wall_thickness_m=0.8e-3,
+        inlet_T_K=cfg.propellants.fuel_temp_K, inlet_p_bar=60.0)
     return RegenConfig(
         meta=MetaCfg(name=cfg.engine),
         contour=ContourCfg(type="from_engine"),
@@ -122,6 +126,8 @@ def suggest_n_channels(data: dict[str, Any]) -> dict[str, Any]:
     cfg, result = _pipeline_result(data)
     rt = result.thrust_chamber.throat_radius_m
     cool = cfg.cooling
+    if cool is None:
+        raise ValueError("this design has no cooling block — channel count follows the regen layout")
     circ = 2 * np.pi * (rt + cool.inner_wall_thickness_m)
     pitch = cool.channel_width_m + cool.rib_width_m
     n = max(4, int(circ / pitch))

@@ -1,0 +1,12 @@
+# Runtime for the hosted Studio API (Vercel Python function, api/index.py).
+# Local installs use pyproject.toml: pip install -e ".[studio,report]"
+pydantic>=2
+CoolProp>=6.4
+pyyaml
+numpy>=2.0
+scipy
+pandas
+cea>=3.3
+fastapi
+# shared team workspace in Postgres (DATABASE_URL / POSTGRES_URL from Neon etc.)
+psycopg[binary]>=3.1

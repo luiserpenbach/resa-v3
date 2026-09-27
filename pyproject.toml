@@ -7,7 +7,12 @@ name = "resa"
 version = "0.1.0"
 description = "Rocket Engine Sizing & Analysis — library-first, YAML-configured"
 requires-python = ">=3.10"
-dependencies = ["pydantic>=2", "CoolProp>=6.4", "pyyaml", "numpy>=2.0", "scipy", "pandas"]
+dependencies = [
+    "pydantic>=2", "CoolProp>=6.4", "pyyaml", "numpy>=2.0", "scipy", "pandas",
+    # NASA CEA (prebuilt wheels, no Fortran): combustion backend "cea" and the
+    # stand-in when rocketcea is not installed
+    "cea>=3.3; python_version >= '3.11'",
+]
 
 [project.optional-dependencies]
 cea = ["rocketcea"]
@@ -17,6 +22,8 @@ step = ["cadquery-ocp"]
 report = ["plotly", "matplotlib", "reportlab"]
 cad = ["cadquery-ocp"]
 studio = ["fastapi", "uvicorn[standard]", "httpx"]
+# shared team workspace in PostgreSQL (DATABASE_URL); files / SQLite need nothing extra
+workspace-pg = ["psycopg[binary]>=3.1"]
 dev = ["pytest", "httpx"]
 
 [tool.pytest.ini_options]

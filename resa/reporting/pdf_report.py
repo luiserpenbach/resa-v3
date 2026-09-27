@@ -223,20 +223,21 @@ def _inputs_section(story, styles, cfg: EngineConfig) -> None:
     ]))
 
     c = cfg.cooling
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(
-        "Cooling block (throat fit check only" +
-        (" - the regen block below drives the solver)" if cfg.regen is not None else ")"),
-        styles["h2"]))
-    story.append(_kv_table([
-        ("Coolant", c.coolant),
-        ("Channels", str(c.n_channels)),
-        ("Channel w x h",
-         f"{c.channel_width_m * 1e3:.2f} x {c.channel_height_m * 1e3:.2f} mm"),
-        ("Rib width", f"{c.rib_width_m * 1e3:.2f} mm"),
-        ("Wall thickness", f"{c.inner_wall_thickness_m * 1e3:.2f} mm"),
-        ("Inlet T / p", f"{c.inlet_T_K:.1f} K / {c.inlet_p_bar:.1f} bar"),
-    ]))
+    if c is not None:
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(
+            "Cooling block (throat fit check only" +
+            (" - the regen block below drives the solver)" if cfg.regen is not None else ")"),
+            styles["h2"]))
+        story.append(_kv_table([
+            ("Coolant", c.coolant),
+            ("Channels", str(c.n_channels)),
+            ("Channel w x h",
+             f"{c.channel_width_m * 1e3:.2f} x {c.channel_height_m * 1e3:.2f} mm"),
+            ("Rib width", f"{c.rib_width_m * 1e3:.2f} mm"),
+            ("Wall thickness", f"{c.inner_wall_thickness_m * 1e3:.2f} mm"),
+            ("Inlet T / p", f"{c.inlet_T_K:.1f} K / {c.inlet_p_bar:.1f} bar"),
+        ]))
     if cfg.regen is not None:
         rs = cfg.regen.solver
         story.append(Spacer(1, 4 * mm))

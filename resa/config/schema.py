@@ -88,16 +88,16 @@ NozzleFlow = Literal["single_gamma", "equilibrium", "frozen", "frozen_at_throat"
 
 
 class CombustionConfig(StrictModel):
-    backend: Literal["rocketcea", "table"] = "table"
+    backend: Literal["rocketcea", "cea", "table"] = "table"
     table: Optional[CombustionTable] = None
     # nozzle expansion model for CF / exit state:
     #   single_gamma     isentropic relations with the chamber gamma (table + CEA)
-    #   equilibrium      CEA shifting-equilibrium expansion (rocketcea only)
-    #   frozen           CEA composition frozen at the chamber (rocketcea only)
+    #   equilibrium      CEA shifting-equilibrium expansion (rocketcea / cea)
+    #   frozen           CEA composition frozen at the chamber (rocketcea / cea)
     #   frozen_at_throat CEA equilibrium to the throat, frozen downstream
     nozzle_flow: NozzleFlow = "single_gamma"
     # build CEA propellant cards from propellants.*_temp_K / *_phase instead of
-    # rocketcea's default reference states (rocketcea only)
+    # the CEA default reference states (rocketcea / cea)
     use_delivery_temperatures: bool = False
 
     @model_validator(mode="after")
@@ -108,11 +108,11 @@ class CombustionConfig(StrictModel):
             if self.nozzle_flow != "single_gamma":
                 raise ValueError(
                     "combustion.nozzle_flow other than 'single_gamma' needs "
-                    "backend='rocketcea' (a table has no nozzle expansion data)"
+                    "backend='rocketcea' or 'cea' (a table has no nozzle expansion data)"
                 )
             if self.use_delivery_temperatures:
                 raise ValueError(
-                    "combustion.use_delivery_temperatures needs backend='rocketcea'"
+                    "combustion.use_delivery_temperatures needs backend='rocketcea' or 'cea'"
                 )
         return self
 
@@ -327,7 +327,9 @@ class EngineConfig(StrictModel):
     propellants: PropellantConfig
     combustion: CombustionConfig
     chamber: ChamberConfig
-    cooling: CoolingConfig
+    # legacy throat-fit block: optional — a `regen` block describes the cooling
+    # channels completely (the Studio writes only `regen`)
+    cooling: Optional[CoolingConfig] = None
     operating_point: Optional[OperatingPoint] = None   # DESIGN mode
     analyze_point: Optional[AnalyzePoint] = None       # ANALYZE mode
     geometry: Optional[GeometryConfig] = None          # required for ANALYZE
@@ -346,7 +348,7 @@ class EngineConfig(StrictModel):
         if self.analyze_point is not None and self.geometry is None:
             raise ValueError("analyze_point requires a geometry block")
         c = self.cooling
-        if c.n_channels * (c.channel_width_m + c.rib_width_m) > 1.0:
+        if c is not None and c.n_channels * (c.channel_width_m + c.rib_width_m) > 1.0:
             raise ValueError("channel layout exceeds 1 m circumference — check units")
         pr = self.propellants
         coupled = ("fuel" if pr.fuel_temp_source == "regen_outlet"

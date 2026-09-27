@@ -43,8 +43,8 @@ def _checks(cfg: EngineConfig, tc, cont, *, pc_converged: bool = True) -> tuple:
             f"0.4·p_amb (Summerfield)"
         )
     c = cfg.cooling
-    circ = 2 * np.pi * (tc.throat_radius_m + c.inner_wall_thickness_m)
-    need = c.n_channels * (c.channel_width_m + c.rib_width_m)
+    circ = 2 * np.pi * (tc.throat_radius_m + c.inner_wall_thickness_m) if c else np.inf
+    need = c.n_channels * (c.channel_width_m + c.rib_width_m) if c else 0.0
     if need > circ:
         w.append(
             f"cooling channels do not fit throat circumference: "
@@ -72,7 +72,7 @@ def _checks(cfg: EngineConfig, tc, cont, *, pc_converged: bool = True) -> tuple:
 def _cooling_block_check(cfg: EngineConfig, tc, comb, cont) -> tuple:
     """The `cooling` block only feeds the throat fit check; the regen block
     drives the solver. Flag disagreements so the report cannot mislead."""
-    if cfg.regen is None or cont is None:
+    if cfg.regen is None or cont is None or cfg.cooling is None:
         return ()
     try:
         from .regen.integration import _build_contour, prepare_regen_config
@@ -105,7 +105,7 @@ def _cooling_block_check(cfg: EngineConfig, tc, comb, cont) -> tuple:
 def _combustion_state_warnings(cfg: EngineConfig, model) -> tuple:
     """Warn when CEA runs on its default propellant reference states while the
     config specifies clearly different delivery conditions."""
-    if cfg.combustion.backend != "rocketcea" or cfg.combustion.use_delivery_temperatures:
+    if cfg.combustion.backend == "table" or cfg.combustion.use_delivery_temperatures:
         return ()
     info = getattr(model, "card_info", None) or {}
     pr = cfg.propellants
@@ -278,6 +278,8 @@ def run(cfg: EngineConfig) -> EngineResult:
     nozzle_ref, ref_warnings = _nozzle_reference(cfg, model, tc)
     extra_warnings += list(ref_warnings)
     extra_warnings += list(_combustion_state_warnings(cfg, model))
+    if getattr(model, "note", ""):
+        extra_warnings.append(model.note)
     extra_warnings += list(_loss_warnings(est, point.eta_cf_source))
 
     # 6. off-design / throttle sweeps (same kernel, fixed geometry) -----------

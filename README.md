@@ -5,7 +5,7 @@ self-contained report folders. Optional **RESA Studio** web UI for interactive
 editing and previews.
 
 **Config reference:** [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
-**Studio UI:** [docs/STUDIO.md](docs/STUDIO.md)
+**Studio UI:** [docs/STUDIO.md](docs/STUDIO.md) · [review & revision 2](docs/STUDIO_REVIEW.md) · [deploying (Vercel, containers)](docs/DEPLOY.md)
 
 ## Quick start
 
@@ -28,12 +28,22 @@ python -m resa campaign campaigns/EX15-1A/ex15_regen.yaml
 
 ```bash
 pip install -e ".[studio,report]"
+(cd web && npm ci && npm run build)
 python -m resa_studio
 # → http://127.0.0.1:8000
 ```
 
-Edit configs with live contour/cooling previews, run fast or full reports, compare
-saved runs, and launch campaigns from the sidebar. See [docs/STUDIO.md](docs/STUDIO.md).
+Quick estimates without a project, heat-load hand calcs, cooling-channel design
+with wall margins and the coolant p–h diagram, and project workspaces with
+version history. Deployable to Vercel as-is (`vercel.json`). The previous UI
+lives at `/classic/`. See [docs/STUDIO.md](docs/STUDIO.md).
+
+### Combustion chemistry
+
+`combustion.backend: cea` uses NASA CEA (`pip install cea`, prebuilt wheels, no
+Fortran), which is installed with RESA on Python ≥ 3.11. Configs that ask for
+`rocketcea` fall back to it automatically when rocketcea is not installed
+(within ~0.1 % of rocketcea, see [CONFIGURATION.md](docs/CONFIGURATION.md#combustion)).
 
 ## Config layout
 
@@ -160,8 +170,10 @@ resa/
 ├── pipeline.py       stage wiring + sanity checks
 ├── reporting/        plots, markdown report, PDF report
 └── results.py        frozen result dataclasses + sweep serialization
-resa_studio/          FastAPI UI (see docs/STUDIO.md)
-frontend/public/      static SPA assets
+resa_studio/          FastAPI API: stateless calculations + project workspace (see docs/STUDIO.md)
+web/                  RESA Studio app (Vite + React + TypeScript)
+frontend/public/      classic Studio UI (/classic/)
+api/index.py          Vercel function entrypoint
 docs/
 ├── CONFIGURATION.md  complete engine + regen config reference
 └── STUDIO.md         web UI guide
@@ -193,6 +205,8 @@ Reports include warnings for:
 - [x] η_c* uncertainty bands
 - [x] High-fidelity regen channel solver + RESA integration
 - [x] RESA Studio web UI (fast/full runs, previews, compare, campaigns)
+- [x] RESA Studio 2: quick estimate, heat-load hand calc, cooling design with p–h diagram and layout assistant, project workspaces with versions, Vercel deployment
+- [x] NASA CEA combustion backend (`backend: cea`), automatic stand-in for rocketcea
 - [x] CEA-native nozzle expansion (`combustion.nozzle_flow`: equilibrium / frozen) with the ideal Isp band and kinetic-freezing warning
 - [x] Delivery-temperature propellant cards (`combustion.use_delivery_temperatures`) and regen-outlet → propellant temperature coupling
 - [x] Bartz with CEA transport properties, throat curvature from the chamber arcs, effective c*, ± band on the correction factor
