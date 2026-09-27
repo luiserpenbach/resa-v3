@@ -38,6 +38,8 @@ export function humanize(msg: string): string {
     .replace(/propellants\.(ox|fuel)_temp_K/g, (_m, s) => `${s === "ox" ? "oxidizer" : "fuel"} delivery temperature`)
     .replace(/solver\.hot_gas\.[a-z_/]+/g, "hot-gas properties")
     .replace(/\bregen: /g, "")
+    .replace(/(uncalibrated )?Bartz (factor|correction)/g, "$1heat-transfer factor")
+    .replace(/at Bartz ([\d.]+)/g, "at heat-transfer factor $1")
     .replace(/\bpc\b/g, "chamber pressure")
     .replace(/\bp_amb\b/g, "ambient pressure");
 }

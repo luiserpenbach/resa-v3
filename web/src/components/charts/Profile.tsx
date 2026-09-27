@@ -51,7 +51,8 @@ function ProfileEditor({ points, onChange, unit, scale, xRange, silhouette }: {
   const m = { l: 40, r: 10, t: 10, b: 20 };
   const vals = points.map((p) => p[1] * scale);
   const vMax = Math.max(...vals, 1e-9) * 1.3;
-  const xs = linear(xRange[0] * 1e3, xRange[1] * 1e3, m.l, W - m.r, 4);
+  const pad = (xRange[1] - xRange[0]) * 1e3 * 0.04;   // keep end points off the axis labels
+  const xs = linear(xRange[0] * 1e3 - pad, xRange[1] * 1e3 + pad, m.l, W - m.r, 4);
   const ys = linear(0, vMax, H - m.b, m.t, 3);
   const drag = useRef<number | null>(null);
   const [sel, setSel] = useState<number | null>(null);
