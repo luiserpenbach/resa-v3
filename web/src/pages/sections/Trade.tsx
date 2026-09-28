@@ -91,7 +91,7 @@ export function TradeSection() {
             </div>
             <section className="card" style={{ overflowX: "auto" }}>
               <table className="table">
-                <thead><tr><th className="num">{r.label}</th>{shown.map((o) => <th key={o.key} className="num">{o.label} [{o.unit}]</th>)}</tr></thead>
+                <thead><tr><th className="num">{r.label}<span className="unit">{r.unit || "–"}</span></th>{shown.map((o) => <th key={o.key} className="num">{o.label}<span className="unit">{o.unit}</span></th>)}</tr></thead>
                 <tbody>{rows.map((row, i) => (
                   <tr key={i}><td className="num">{sig(row.value as number, 4)}</td>
                     {shown.map((o) => <td key={o.key} className="num">{typeof row[o.key] === "number" ? sig((row[o.key] as number) * (o.scale ?? 1), 4) : "—"}</td>)}</tr>

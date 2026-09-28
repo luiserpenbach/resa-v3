@@ -53,7 +53,7 @@ export function Icon({ name, size, className = "" }: { name: keyof typeof PATHS 
 export function BrandMark() {
   return (
     <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="7" fill="var(--ink)" />
+      <rect x="1" y="1" width="30" height="30" rx="2" fill="var(--ink)" />
       <path d="M6 10.5h7.5l2.2 3.2c1.4 2 3.4 2.3 5.2 1V13c2-2 4.5-3.5 5.6-4.2M6 21.5h7.5l2.2-3.2c1.4-2 3.4-2.3 5.2-1V19c2 2 4.5 3.5 5.6 4.2"
         stroke="var(--surface)" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M4 16h24" stroke="var(--hot)" strokeWidth="1.2" strokeDasharray="3 1.6 1 1.6" />

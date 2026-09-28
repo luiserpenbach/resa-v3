@@ -8,8 +8,8 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script>
       (function () {
-        var t = "system";
-        try { t = localStorage.getItem("resa.theme") || "system"; } catch (e) {}
+        var t = "dark";
+        try { t = localStorage.getItem("resa.theme") || "dark"; } catch (e) {}
         var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
       })();

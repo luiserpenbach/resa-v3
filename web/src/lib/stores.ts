@@ -25,7 +25,7 @@ interface Settings {
 
 export const useSettings = create<Settings>((set) => ({
   author: readLS("resa.author", ""),
-  theme: readLS("resa.theme", "system") as Theme,
+  theme: readLS("resa.theme", "dark") as Theme,
   setAuthor: (author) => { writeLS("resa.author", author); set({ author }); },
   setTheme: (theme) => { writeLS("resa.theme", theme); applyTheme(theme); set({ theme }); },
 }));

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { TopBar } from "../App";
-import { EngineDrawing } from "../components/charts/Drawing";
 import { Field } from "../components/ui/controls";
 import { Dialog, Empty } from "../components/ui/display";
 import { Icon } from "../components/ui/icons";
@@ -9,25 +8,11 @@ import { relTime } from "../lib/format";
 import { authorName, readRecents, toast } from "../lib/stores";
 import { Bundle, Project, Workspace, WorkspaceInfo, connectWorkspace } from "../lib/workspace";
 
-/** Illustrative bell contour (normalized) for the hero drawing. */
-export function sampleContour() {
-  const x: number[] = [], r: number[] = [];
-  const Rc = 1.0, Rt = 0.42, Re = 1.25;
-  for (let i = 0; i <= 20; i++) { x.push(-2.6 + (i / 20) * 1.2); r.push(Rc); }
-  for (let i = 1; i <= 40; i++) {
-    const t = i / 40;
-    x.push(-1.4 + t * 1.4);
-    r.push(Rt + (Rc - Rt) * (0.5 + 0.5 * Math.cos(Math.PI * t)));
-  }
-  for (let i = 1; i <= 60; i++) {
-    const t = i / 60;
-    x.push(t * 3.1);
-    r.push(Rt + (Re - Rt) * (1 - Math.pow(1 - t, 1.9)));
-  }
-  return { x, r };
-}
-const HERO = sampleContour();
-const HERO_HEAT = { x: HERO.x, q: HERO.r.map((r) => Math.pow(HERO.r[0] / r, 1.8)) };
+const STARTS = [
+  { href: "/estimate", tone: "hot", icon: "gauge", title: "Quick estimate", text: "Isp, flow rates, throat and exit size" },
+  { href: "/estimate/heat", tone: "hot", icon: "flame", title: "Heat load", text: "Heat flux along the wall and total heat load" },
+  { href: "/estimate/cooling", tone: "cool", icon: "channels", title: "Cooling channels", text: "Channel layout, wall temperature, p–h diagram" },
+] as const;
 
 export default function Home() {
   const [, nav] = useLocation();
@@ -70,42 +55,30 @@ export default function Home() {
     <>
       <TopBar />
       <main className="home">
-        <section className="hero">
-          <div>
-            <div className="eyebrow">Rocket engine sizing &amp; cooling design</div>
-            <h1 className="display" style={{ marginTop: 10 }}>What do you need<br />to <em>know</em> today?</h1>
-            <p className="lede">Start with the answer you need — an Isp and throat size, the heat load on the walls, or a full
-              cooling-channel design. Everything is one engine design, so a quick estimate grows into a detailed one without re-typing.</p>
-          </div>
-          <div className="hero-art" aria-hidden="true">
-            <EngineDrawing x={HERO.x} r={HERO.r} heat={HERO_HEAT} height={210} compact />
-          </div>
-        </section>
+        <header className="home-head">
+          <h1>Workspace</h1>
+          {projects && <span className="home-sub">{projects.length} project{projects.length === 1 ? "" : "s"}</span>}
+          <span className="spacer" />
+          <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
+          <button className="btn" onClick={() => fileRef.current?.click()}><Icon name="upload" size="sm" />Import</button>
+          <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size="sm" />New project</button>
+        </header>
 
-        <section className="tasks">
-          <button className="task hot" onClick={() => nav("/estimate")}>
-            <span className="task-no">01</span>
-            <h3>Quick estimate</h3>
-            <p>Thrust, chamber pressure, propellants — get Isp, flow rates, throat and exit size in seconds. No project needed.</p>
-            <span className="task-go">Start estimating <Icon name="arrow" size="sm" /></span>
-          </button>
-          <button className="task hot" onClick={() => nav("/estimate/heat")}>
-            <span className="task-no">02</span>
-            <h3>Heat load</h3>
-            <p>Heat flux along the chamber and nozzle, total heat into the wall, and whether your propellant can absorb it.</p>
-            <span className="task-go">Check the heat load <Icon name="arrow" size="sm" /></span>
-          </button>
-          <button className="task cool" onClick={() => nav("/estimate/cooling")}>
-            <span className="task-no">03</span>
-            <h3>Cooling channels</h3>
-            <p>Lay out regenerative channels, check wall temperature against the material limit and follow the coolant on a p–h diagram.</p>
-            <span className="task-go">Design channels <Icon name="arrow" size="sm" /></span>
-          </button>
+        <div className="section-head"><h2>Quick tools</h2><span className="muted" style={{ fontSize: 12.5 }}>no project needed — save to one later if it’s worth keeping</span></div>
+        <section className="starts">
+          {STARTS.map((t) => (
+            <button key={t.href} className={`start ${t.tone}`} onClick={() => nav(t.href)}>
+              <span className="start-icon"><Icon name={t.icon} /></span>
+              <h3>{t.title}</h3>
+              <p>{t.text}</p>
+              <Icon name="arrow" className="start-go" />
+            </button>
+          ))}
         </section>
 
         {recents.length > 0 && (
-          <section style={{ marginBottom: 40 }}>
-            <div className="section-head"><h2>Continue where you left off</h2></div>
+          <section style={{ marginBottom: 36 }}>
+            <div className="section-head"><h2>Recent designs</h2></div>
             <div className="row-wrap">
               {recents.map((r) => (
                 <Link key={`${r.pid}/${r.did}`} href={`/p/${r.pid}/d/${r.did}`} className="chip" style={{ textDecoration: "none", padding: "7px 12px" }}>
@@ -119,11 +92,7 @@ export default function Home() {
         <section>
           <div className="section-head">
             <h2>Projects</h2>
-            <span className="muted" style={{ paddingBottom: 6 }}>a project holds the engine designs of one program, with their full history</span>
-            <span className="spacer" />
-            <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
-            <button className="btn" onClick={() => fileRef.current?.click()}><Icon name="upload" size="sm" />Import</button>
-            <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size="sm" />New project</button>
+            <span className="muted" style={{ fontSize: 12.5 }}>one per engine program — its designs and their version history</span>
           </div>
           {projects === null ? (
             <div className="projects">{[0, 1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 120 }} />)}</div>

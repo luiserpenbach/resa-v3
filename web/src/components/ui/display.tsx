@@ -10,7 +10,7 @@ export function Kpi({ label, value, unit, sub, tone, hero, title }: {
 }) {
   return (
     <div className={`kpi${tone ? ` ${tone}` : ""}${hero ? " kpi-hero" : ""}`} title={title}>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-label" title={typeof label === "string" ? label : undefined}>{label}</div>
       <div className="kpi-value"><span className="v">{value}</span>{unit && <span className="u">{unit}</span>}</div>
       {sub && <div className="kpi-sub">{sub}</div>}
     </div>
