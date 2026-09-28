@@ -147,6 +147,7 @@ export function LineChart({
   };
   const fx = xFormat ?? fmtTick(xs);
   const shown = series.filter((s) => !s.hideInLegend);
+  const refLeft = xMarks.some((mk) => xs(mk.x) > m.l + 0.55 * (W - m.l - m.r));
 
   return (
     <div className="chart" ref={ref}>
@@ -179,7 +180,10 @@ export function LineChart({
         {refLines.map((r) => (
           <g key={r.label}>
             <line x1={m.l} x2={W - m.r} y1={ys(r.y)} y2={ys(r.y)} stroke={r.color} strokeWidth={1.2} strokeDasharray={r.dash === false ? undefined : "6 4"} />
-            <text x={W - m.r - 4} y={ys(r.y) - 5} textAnchor="end" className="tick" style={{ fill: "var(--ink-2)" }}>{r.label}</text>
+            {/* label on the side free of x-marker labels (e.g. "throat" near the right edge) */}
+            {refLeft
+              ? <text x={m.l + 4} y={ys(r.y) - 5} className="tick" style={{ fill: "var(--ink-2)" }}>{r.label}</text>
+              : <text x={W - m.r - 4} y={ys(r.y) - 5} textAnchor="end" className="tick" style={{ fill: "var(--ink-2)" }}>{r.label}</text>}
           </g>
         ))}
         {series.map((s) => (

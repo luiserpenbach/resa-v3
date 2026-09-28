@@ -142,6 +142,35 @@ def test_layout_assistant_returns_a_valid_regen_block(regen_design):
     assert cool["ok"], cool
 
 
+def _quick_design():
+    """The web app's default quick estimate: 2 kN LOX/ethanol at 20 bar, sea level."""
+    return {
+        "engine": "QUICK-1", "description": "",
+        "propellants": {"name": "LOX/Ethanol", "oxidizer": "Oxygen", "fuel": "Ethanol",
+                        "ox_temp_K": 90.0, "fuel_temp_K": 293.15, "cea_oxidizer": "LOX",
+                        "cea_fuel": "Ethanol", "ox_phase": "liquid", "fuel_phase": "liquid"},
+        "combustion": {"backend": "cea", "nozzle_flow": "equilibrium",
+                       "use_delivery_temperatures": True},
+        "chamber": {"contraction_ratio": 5, "l_star_m": 1.0, "contour": "rao_bell",
+                    "bell_fraction": 0.8, "conv_half_angle_deg": 35, "bartz_correction": 1.0,
+                    "n_stations": 200},
+        "operating_point": {"thrust_N": 2000, "pc_bar": 20, "eta_cstar": 0.95, "eta_cf": 0.98,
+                            "eta_cf_source": "estimate", "p_amb_bar": 1.01325, "of_ratio": 1.6,
+                            "eps": None, "pe_bar": None},
+    }
+
+
+def test_layout_assistant_passes_the_default_quick_design():
+    d = _quick_design()
+    j = client.post("/api/calc/cooling/suggest", json={"design": d}).json()
+    d["regen"] = j["regen"]
+    cool = client.post("/api/calc/cooling", json={"design": d}).json()
+    assert cool["ok"], cool
+    sm = cool["summary"]
+    assert sm["wall_margin_K"] >= 0, (sm, j["notes"])
+    assert sm["feed_margin_bar"] >= 0, sm
+
+
 def test_hopelessly_overexpanded_nozzle_says_so(regen_design):
     d = copy.deepcopy(regen_design)
     d["regen"] = None

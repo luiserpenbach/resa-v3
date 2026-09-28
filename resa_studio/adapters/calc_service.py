@@ -557,21 +557,23 @@ def _regen_block(cfg: EngineConfig, side: str, fluid: str, count: int, height: A
     }
 
 
-def suggest_channels(design: dict[str, Any], max_trials: int = 8) -> dict[str, Any]:
+def suggest_channels(design: dict[str, Any], max_trials: int = 12) -> dict[str, Any]:
     """A first regen layout that works for this design.
 
     Sizing rules (a starting point, meant to be refined):
       * coolant: the fuel when CoolProp can model it, else the oxidizer
-      * pitch ~ 7 % of the throat diameter (0.9..3 mm), rib 40 % of it
+      * pitch ~ 5 % of the throat diameter (0.9..3 mm), rib 40 % of it
       * throat channel height from a target coolant velocity: 30 m/s for
         liquids, Mach 0.15 for gases (CoolProp density at the inlet); the
         nozzle side tapers to hold the flow area, the chamber side keeps at
         least the throat height (lower flux, long channels)
       * copper alloy above ~8 MW/m2 peak flux, else Inconel 718
       * channels end at area ratio 15 on large nozzles (radiation-cooled beyond)
-    Candidates (deeper channels, higher inlet pressure) are then solved at
-    preview resolution; the first that stays under the wall limit with feed
-    margin wins, else the best feasible one.
+    Candidates are then solved at preview resolution. A wall that runs too
+    hot pulls, in order: shallower channels, more (narrower) channels,
+    GRCop-42 instead of CuCrZr (1000 K vs 800 K), wider ribs; a pressure
+    drop beyond the feed budget raises the inlet pressure. The first layout
+    under the wall limit with feed margin wins, else the best feasible one.
     """
     from CoolProp.CoolProp import PropsSI
 
@@ -615,11 +617,13 @@ def suggest_channels(design: dict[str, Any], max_trials: int = 8) -> dict[str, A
     dt = 2 * rt
     q_max = e.q_max_W_m2
     copper = q_max > 8e6
-    material = ("GRCop-42" if dt < 0.02 else "CuCrZr") if copper else "Inconel 718"
+    material0 = ("GRCop-42" if dt < 0.02 else "CuCrZr") if copper else "Inconel 718"
     wall = (0.5e-3 if dt < 0.02 else 0.7e-3) if copper else (0.5e-3 if dt < 0.02 else 0.8e-3)
-    pitch = float(np.clip(0.07 * dt, 0.9e-3, 3e-3))
-    rib0 = max(0.4 * pitch, 0.4e-3)
-    count = max(8, int(round(2 * np.pi * (rt + wall) / pitch)))
+    pitch0 = float(np.clip(0.05 * dt, 0.9e-3, 3e-3))
+    rib0 = max(0.4 * pitch0, 0.4e-3)
+    circ_t = 2 * np.pi * (rt + wall)
+    count0 = max(8, int(round(circ_t / pitch0)))
+    w_min = 0.35e-3                        # narrowest channel the assistant proposes
     h_lo, h_hi = (0.3e-3 if dt < 0.02 else 0.4e-3), max(4e-3, 0.3 * dt)
 
     cont = res.contour
@@ -632,18 +636,21 @@ def suggest_channels(design: dict[str, Any], max_trials: int = 8) -> dict[str, A
         stop_x = round(float(x[k15]), 4)
     x_end = stop_x if stop_x is not None else float(x[-1])
 
-    def width_at(k: int, rib: float) -> float:
+    def width_at(k: int, rib: float, count: int) -> float:
         return max(2 * np.pi * (r[k] + wall) / count - rib, 1e-4)
 
-    def profile(h_t: float, rib: float):
+    def max_count(rib: float) -> int:
+        return max(8, int(circ_t // (rib + w_min)))
+
+    def profile(h_t: float, rib: float, count: int):
         picks = sorted({0, it // 2, int(0.85 * it), it})
         nz = [k for k in range(it, len(x)) if x[k] <= x_end + 1e-9]
         picks = sorted(set(picks) | {nz[len(nz) // 3], nz[2 * len(nz) // 3], nz[-1]})
-        area_t = count * width_at(it, rib) * h_t
+        area_t = count * width_at(it, rib, count) * h_t
         pts = []
         for k in picks:
             lo = h_t if k < it else max(h_lo, 0.7 * h_t)
-            h_k = float(np.clip(area_t / (count * width_at(k, rib)), lo, min(h_hi, 2.5 * h_t)))
+            h_k = float(np.clip(area_t / (count * width_at(k, rib, count)), lo, min(h_hi, 2.5 * h_t)))
             pts.append([round(float(x[k]), 4), round(h_k, 5)])
         flat = max(p[1] for p in pts) - min(p[1] for p in pts) < 0.05e-3
         return round(h_t, 5) if flat else pts
@@ -657,23 +664,25 @@ def suggest_channels(design: dict[str, Any], max_trials: int = 8) -> dict[str, A
         except ValueError:
             rho, a = 800.0, 1000.0
         v_target = 30.0 if rho > 40.0 else 0.15 * a     # liquids (incl. LH2) vs gases
-        rib = rib0
-        h_t = float(np.clip(mdot / (rho * v_target) / (count * width_at(it, rib)), h_lo, h_hi))
+        rib, count, material = rib0, count0, material0
+        h_t = float(np.clip(mdot / (rho * v_target) / (count * width_at(it, rib, count)), h_lo, h_hi))
         p_in, p_cap = p0, float(round(2.5 * p0))
+        h_floor = h_lo                     # raised when a shallower channel collapsed
         best, trials = None, []
         for _ in range(max_trials):
-            block = _regen_block(cfg, side, fluid, count, profile(h_t, rib), round(rib, 5), wall,
+            block = _regen_block(cfg, side, fluid, count, profile(h_t, rib, count), round(rib, 5), wall,
                                  p_in, T_in, material, stop_x)
             d = {**_strip_offdesign(design), "regen": block, "cooling": None}
             d["propellants"] = {**design["propellants"], "fuel_temp_source": "input",
                                 "ox_temp_source": "input"}
             out = cooling(d, "preview")
-            row = {"side": side, "height_throat_m": round(h_t, 6), "rib_m": round(rib, 6),
-                   "inlet_p_bar": p_in, "ok": bool(out.get("ok"))}
+            row = {"side": side, "count": count, "height_throat_m": round(h_t, 6), "rib_m": round(float(rib), 6),
+                   "material": material, "inlet_p_bar": p_in, "ok": bool(out.get("ok"))}
             trials.append(row)
             if not out.get("ok"):
                 # pressure collapse / choking: open the channels, raise the pressure
                 row["error"] = str(out.get("error", ""))[:160]
+                h_floor = min(max(h_floor, h_t * 1.15), h_hi)
                 h_t, p_in = min(h_t * 1.4, h_hi), min(float(round(p_in * 1.3)), p_cap)
                 continue
             sm = out["summary"]
@@ -685,22 +694,32 @@ def suggest_channels(design: dict[str, Any], max_trials: int = 8) -> dict[str, A
             row.update(T_wall_max_K=sm.get("T_wall_max_K"), margin_K=margin, dp_bar=dp,
                        feed_margin_bar=feed)
             score = (feed_ok, min(margin, 150.0), -dp)
-            if best is None or score > best[0]:
-                best = (score, block, h_t, p_in, rib, v_target)
+            if best is None or score > best["score"]:
+                best = {"score": score, "block": block, "h_t": h_t, "p_in": p_in, "rib": rib,
+                        "count": count, "material": material, "v_target": v_target}
             if feed_ok and margin >= 0:
                 break
             if not feed_ok:
                 if p_in >= p_cap:
+                    # out of feed pressure: this depth is too shallow for good
+                    h_floor = min(max(h_floor, h_t * 1.15), h_hi)
                     h_t = min(h_t * 1.3, h_hi)
                 p_in = min(float(round(p_in - (feed or 0.0) * 1.3 + 5.0)), p_cap)
-            elif h_t > h_lo * 1.01:
-                # too hot: faster coolant in shallower channels
-                h_t = max(h_t * 0.72, h_lo)
-                p_in = min(float(round(p_in + 1.5 * dp)), p_cap)
-            elif rib < 0.65 * pitch:
-                # already shallow: narrower channels (wider ribs) for more speed
-                rib = min(rib * 1.35, 0.65 * pitch)
-                p_in = min(float(round(p_in + dp)), p_cap)
+            elif h_t > h_floor * 1.01:
+                # too hot: faster coolant in shallower channels (dp grows ~ 1/h^2)
+                h_t = max(h_t * 0.72, h_floor)
+                p_in = min(float(round(p_in + 0.9 * dp)), p_cap)
+            elif count < max_count(rib):
+                # already shallow: more, narrower channels (more fin area, faster coolant)
+                count = min(int(round(count * 1.3)), max_count(rib))
+                p_in = min(float(round(p_in + 0.6 * dp)), p_cap)
+            elif material == "CuCrZr":
+                # CuCrZr over-ages above ~800 K; GRCop-42 holds its strength to ~1000 K
+                material = "GRCop-42"
+            elif rib < circ_t / count - w_min - 1e-6:
+                # narrower channels still (wider ribs) for more speed
+                rib = min(rib * 1.3, circ_t / count - w_min)
+                p_in = min(float(round(p_in + 0.6 * dp)), p_cap)
             else:
                 break
         return best, trials
@@ -710,28 +729,34 @@ def suggest_channels(design: dict[str, Any], max_trials: int = 8) -> dict[str, A
     for capable, _fuel, side_, fluid_, mdot_, T_, p_ in options:
         b, t = search(side_, fluid_, mdot_, T_, p_)
         trials += t
-        if b is not None and (best is None or b[0] > best[0][0]):
+        if b is not None and (best is None or b["score"] > best[0]["score"]):
             best = (b, side_, fluid_, T_)
-        if best is not None and best[0][0][0] and best[0][0][1] >= 0:
+        if best is not None and best[0]["score"][0] and best[0]["score"][1] >= 0:
             break
 
     notes: list[str] = []
     if best is None:
         _, _, side, fluid, _, T_in, p_in = options[0]
-        h_t, rib, v_target = h_lo * 2, rib0, 30.0
-        block = _regen_block(cfg, side, fluid, count, profile(h_t, rib), round(rib, 5), wall,
+        h_t, rib, count, material, v_target = h_lo * 2, rib0, count0, material0, 30.0
+        block = _regen_block(cfg, side, fluid, count, profile(h_t, rib, count), round(rib, 5), wall,
                              p_in, T_in, material, stop_x)
         notes.append("no trial layout solved cleanly — this starting point needs manual changes "
                      "(larger channels, higher inlet pressure or the other propellant as coolant)")
     else:
-        ((feed_ok, margin, _), block, h_t, p_in, rib, v_target), side, fluid, T_in = best
+        b, side, fluid, T_in = best
+        feed_ok, margin, _ = b["score"]
+        block, h_t, p_in, rib = b["block"], b["h_t"], b["p_in"], b["rib"]
+        count, material, v_target = b["count"], b["material"], b["v_target"]
+        if material != material0:
+            notes.append(f"wall material {material}: {material0} runs above its temperature limit "
+                         "at this heat flux")
         if margin < 0:
             notes.append(f"the best of {len(trials)} trial layouts still runs the wall "
                          f"{-margin:.0f} K above its limit — consider film cooling, a lower chamber "
                          "pressure or a calibrated heat-transfer factor")
         if not feed_ok:
             notes.append("coolant pressure drop exceeds the feed budget — raise the inlet pressure")
-    width = width_at(it, rib)
+    width = width_at(it, rib, count)
     if side == "oxidizer":
         notes.append(f"cooling with the oxidizer ({fluid}): the fuel flow cannot carry the heat load")
     if stop_x is not None:

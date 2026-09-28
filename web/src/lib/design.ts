@@ -133,7 +133,7 @@ export function suggestChannels(design: Design, perf: PerformanceResult | null, 
   const fuel = catalog ? matchPropellant(catalog, design, "fuel") : undefined;
   const side: "fuel" | "oxidizer" = !fuel || fuel.can_cool ? "fuel" : "oxidizer";
   const wall = dt > 0.02 ? 0.8e-3 : 0.5e-3;
-  const pitch = Math.min(Math.max(0.07 * dt, 0.9e-3), 3e-3);
+  const pitch = Math.min(Math.max(0.05 * dt, 0.9e-3), 3e-3);
   const rib = Math.max(0.4 * pitch, 0.4e-3);
   const circ = 2 * Math.PI * (dt / 2 + wall + 0.5 * (pitch - rib));
   const count = Math.max(8, Math.round(circ / pitch));

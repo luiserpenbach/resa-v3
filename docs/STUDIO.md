@@ -80,9 +80,13 @@ which keep showing the last valid state.
    tapers the height along the nozzle to hold the flow area; picks a copper
    alloy above ~8 MW/m² peak flux; ends the channels at area ratio 15 on large
    nozzles (radiation-cooled beyond);
-3. solves variants (shallower or narrower channels, more inlet pressure) until
-   the wall stays under its limit with feed margin, or returns the best one with
-   a note on what else to change.
+3. solves variants until the wall stays under its limit with feed margin, or
+   returns the best one with a note on what else to change. A wall that runs
+   too hot pulls, in order: shallower channels, more (narrower) channels,
+   GRCop-42 instead of CuCrZr (1000 K vs 800 K limit), wider ribs; a pressure
+   drop beyond the feed budget raises the inlet pressure. The default quick
+   estimate (2 kN LOX/ethanol, 20 bar) comes out at ~104 GRCop-42 channels with
+   the wall ~30 K under its limit.
 
 ## Where projects are stored
 

@@ -200,8 +200,9 @@ design.
 - **Unit preferences** (°C, psi, lbf) are not configurable; the UI uses SI
   engineering units throughout.
 - **Layout assistant.** It gives a sound first cut but cannot close every
-  case. With the textbook heat-transfer factor of 1.0, dense LOX/kerosene or
-  LOX/ethanol engines often need film cooling or a calibrated factor, and it
-  says so.
+  case. It closes the default quick estimate and typical LOX/ethanol,
+  LOX/methane and LOX/hydrogen engines from 2 kN up, but very small engines
+  (~500 N) run far above any wall limit at the textbook heat-transfer factor
+  of 1.0 — they need film cooling or a calibrated factor, and it says so.
 - **STEP export on Vercel.** It needs `cadquery-ocp`, which is too large for a
   function; STL works everywhere.
